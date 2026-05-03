@@ -1,7 +1,9 @@
-import pool from "../config/db.js";
+import { getPool } from "../config/db.js";
 
 // GET all lands
 export const getLands = async (req, res) => {
+  const pool = getPool();
+  if (!pool) return res.status(503).json({ error: "Database not configured" });
   try {
     const result = await pool.query(`
       SELECT 
@@ -21,6 +23,8 @@ export const getLands = async (req, res) => {
 
 // GET lands by user
 export const getLandsByUser = async (req, res) => {
+  const pool = getPool();
+  if (!pool) return res.status(503).json({ error: "Database not configured" });
   try {
     const { userId } = req.params;
     
@@ -45,6 +49,8 @@ export const getLandsByUser = async (req, res) => {
 
 // POST create land
 export const createLand = async (req, res) => {
+  const pool = getPool();
+  if (!pool) return res.status(503).json({ error: "Database not configured" });
   try {
     const { 
       land_name, 
@@ -89,6 +95,8 @@ export const createLand = async (req, res) => {
 
 // POST transfer land ownership
 export const transferLandOwnership = async (req, res) => {
+  const pool = getPool();
+  if (!pool) return res.status(503).json({ error: "Database not configured" });
   try {
     const { id } = req.params;
     const { new_owner_id, transfer_reason } = req.body;

@@ -62,6 +62,12 @@ async function bootstrap() {
 
   app.disable("x-powered-by");
 
+  // Behind Render (and other reverse proxies), trust X-Forwarded-* so rate limiting and IPs are correct.
+  if (process.env.RENDER || process.env.NODE_ENV === "production") {
+    const hops = Number(process.env.TRUST_PROXY_HOPS || 1);
+    app.set("trust proxy", Number.isFinite(hops) && hops >= 0 ? hops : 1);
+  }
+
   app.use(
     helmet({
       crossOriginResourcePolicy: false,

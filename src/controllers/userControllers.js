@@ -1,7 +1,9 @@
-import pool from "../config/db.js";
+import { getPool } from "../config/db.js";
 
 // GET all users
 export const getUsers = async (req, res) => {
+  const pool = getPool();
+  if (!pool) return res.status(503).json({ error: "Database not configured" });
   try {
     const result = await pool.query("SELECT * FROM users");
     res.json(result.rows);
@@ -13,6 +15,8 @@ export const getUsers = async (req, res) => {
 
 // POST create user
 export const createUser = async (req, res) => {
+  const pool = getPool();
+  if (!pool) return res.status(503).json({ error: "Database not configured" });
   try {
     const { full_name, email, national_id } = req.body;
 

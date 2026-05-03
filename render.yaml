@@ -1,0 +1,14 @@
+# Blueprint: create a Web Service (Node), not a static site.
+# Link this repo in Render → New Blueprint, or create a Web Service manually:
+# Build: npm ci   Start: npm start   Health check path: /health
+services:
+  - type: web
+    name: smartland-backend
+    runtime: node
+    plan: free
+    buildCommand: npm ci
+    startCommand: npm start
+    healthCheckPath: /health
+    envVars:
+      - key: NODE_ENV
+        value: production
