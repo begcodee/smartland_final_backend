@@ -9,6 +9,15 @@ function id(prefix = "id") {
 }
 
 // Demo in-memory store (no DB required).
+/** Demo users/parcels: on in local dev; off on Render/production unless SEED_DEMO_USERS=true */
+function shouldSeedDemoData() {
+  if (process.env.SEED_DEMO_USERS === "true") return true;
+  if (process.env.SEED_DEMO_USERS === "false") return false;
+  const prodLike =
+    process.env.NODE_ENV === "production" || String(process.env.RENDER || "") === "true";
+  return !prodLike;
+}
+
 export const store = {
   users: new Map(),
   parcels: new Map(),
@@ -30,7 +39,7 @@ export const store = {
 };
 
 export function seedIfEmpty() {
-  if (store.users.size === 0) {
+  if (store.users.size === 0 && shouldSeedDemoData()) {
   const demoPasswordHash = bcrypt.hashSync("Password123!", 10);
 
   const admin = {

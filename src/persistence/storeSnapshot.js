@@ -2,6 +2,8 @@ import { readFileSync } from "fs";
 import { fileURLToPath } from "url";
 import { dirname, join } from "path";
 
+import { getPool } from "../config/db.js";
+
 const SNAPSHOT_VERSION = 1;
 
 const __filename = fileURLToPath(import.meta.url);
@@ -77,6 +79,11 @@ export async function loadStoreSnapshot(pool) {
   );
   if (!rows.length || !rows[0].payload) return null;
   return rows[0].payload;
+}
+
+/** Flush current store to Postgres (call after mutations when DB is connected). */
+export async function persistStoreNow(store) {
+  await saveStoreSnapshot(getPool(), store);
 }
 
 export async function saveStoreSnapshot(pool, store) {

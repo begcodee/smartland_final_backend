@@ -4,6 +4,7 @@ import { z } from "zod";
 
 import { seedIfEmpty, store, publicUser } from "../store.js";
 import { signToken, authenticate } from "../auth.js";
+import { persistStoreNow } from "../persistence/storeSnapshot.js";
 
 const router = express.Router();
 
@@ -64,6 +65,7 @@ router.post("/register", async (req, res) => {
   };
 
   store.users.set(user.id, user);
+  await persistStoreNow(store);
 
   const token = signToken(user);
   res.status(201).json({

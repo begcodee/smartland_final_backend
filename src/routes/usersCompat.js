@@ -1,6 +1,7 @@
 import express from "express";
 import { authenticate, requireRole } from "../auth.js";
 import { seedIfEmpty, store, publicUser } from "../store.js";
+import { persistStoreNow } from "../persistence/storeSnapshot.js";
 import { z } from "zod";
 import { computeRiskScore } from "../services/risk.js";
 import { audit } from "../services/audit.js";
@@ -35,7 +36,7 @@ router.get("/pending", authenticate, requireRole("lands_commission", "admin"), (
 });
 
 // Update my profile / save verification payload
-router.patch("/me", authenticate, (req, res) => {
+router.patch("/me", authenticate, async (req, res) => {
   seedIfEmpty();
   const me = store.users.get(req.user.id);
   if (!me) return res.status(404).json({ error: "User not found" });
@@ -170,11 +171,12 @@ router.patch("/me", authenticate, (req, res) => {
     }
   }
 
+  await persistStoreNow(store);
   res.json({ success: true, user: publicUser(me, req.user) });
 });
 
 // Lands Commission admin approval (blocked until NIA verified)
-router.patch("/:id/verify", authenticate, requireRole("lands_commission", "admin"), (req, res) => {
+router.patch("/:id/verify", authenticate, requireRole("lands_commission", "admin"), async (req, res) => {
   seedIfEmpty();
   const target = store.users.get(req.params.id);
   if (!target) return res.status(404).json({ error: "User not found" });
@@ -209,6 +211,7 @@ router.patch("/:id/verify", authenticate, requireRole("lands_commission", "admin
       actionUrl: "/",
     });
     audit(req, "lands.verify_user.rejected", { targetUserId: target.id, reason: target.rejectionReason });
+    await persistStoreNow(store);
     return res.json({ success: true, user: publicUser(target, req.user) });
   }
 
@@ -230,6 +233,7 @@ router.patch("/:id/verify", authenticate, requireRole("lands_commission", "admin
             : "/",
   });
   audit(req, "lands.verify_user.approved", { targetUserId: target.id });
+  await persistStoreNow(store);
   res.json({ success: true, user: publicUser(target, req.user) });
 });
 
