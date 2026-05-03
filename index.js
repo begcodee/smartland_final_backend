@@ -7,12 +7,11 @@ import rateLimit from "express-rate-limit";
 import { connectPostgres, closePool, getPool } from "./src/config/db.js";
 import { seedIfEmpty, store } from "./src/store.js";
 import {
-  ensureSnapshotTable,
-  hydrateStore,
-  loadStoreSnapshot,
-  saveStoreSnapshot,
-  startSnapshotScheduler,
-} from "./src/persistence/storeSnapshot.js";
+  ensureSmartlandSchema,
+  loadStoreFromPostgres,
+  flushStoreToPostgres,
+  startFlushScheduler,
+} from "./src/db/relationalStore.js";
 
 import authRoutes from "./src/routes/auth.js";
 import parcelRoutes from "./src/routes/parcels.js";
@@ -31,26 +30,38 @@ import arbitrationRoutes from "./src/routes/arbitration.js";
 async function bootstrap() {
   const pool = await connectPostgres();
   if (pool) {
-    await ensureSnapshotTable(pool);
-    const snap = await loadStoreSnapshot(pool);
-    if (snap) {
-      const ok = hydrateStore(store, snap);
-      if (ok) console.log("[db] Restored application state from PostgreSQL snapshot.");
-      else console.warn("[db] Snapshot missing or unsupported version — using seeded / empty store.");
+    try {
+      await ensureSmartlandSchema(pool);
+    } catch (e) {
+      console.error("[db] ensureSmartlandSchema failed:", e.message);
+    }
+    try {
+      await loadStoreFromPostgres(pool, store);
+      console.log("[db] Loaded application state from PostgreSQL (sl_* tables).");
+    } catch (e) {
+      console.warn("[db] loadStoreFromPostgres failed — starting empty:", e.message);
     }
   }
 
   seedIfEmpty();
 
   if (pool) {
-    await saveStoreSnapshot(pool, store);
+    try {
+      await flushStoreToPostgres(pool, store);
+    } catch (e) {
+      console.warn("[db] initial flush failed:", e.message);
+    }
     const intervalMs = Number(process.env.DB_SNAPSHOT_INTERVAL_MS || 8000);
-    startSnapshotScheduler(pool, store, intervalMs);
-    console.log(`[db] Saving snapshot every ${intervalMs}ms + on shutdown.`);
+    startFlushScheduler(pool, store, intervalMs);
+    console.log(`[db] Relational flush every ${intervalMs}ms + on shutdown.`);
 
     const shutdown = async () => {
-      console.log("[db] Flushing snapshot…");
-      await saveStoreSnapshot(pool, store);
+      console.log("[db] Flushing relational state…");
+      try {
+        await flushStoreToPostgres(pool, store);
+      } catch (e) {
+        console.error("[db] shutdown flush:", e.message);
+      }
       await closePool();
       process.exit(0);
     };
@@ -162,7 +173,7 @@ async function bootstrap() {
       ok: true,
       service: "smartland-backend",
       postgres,
-      snapshotPersistence: Boolean(p),
+      relationalPersistence: Boolean(p),
     });
   });
 

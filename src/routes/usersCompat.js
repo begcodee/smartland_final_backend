@@ -1,7 +1,7 @@
 import express from "express";
 import { authenticate, requireRole } from "../auth.js";
 import { seedIfEmpty, store, publicUser } from "../store.js";
-import { persistStoreNow } from "../persistence/storeSnapshot.js";
+import { persistStoreNow } from "../db/relationalStore.js";
 import { z } from "zod";
 import { computeRiskScore } from "../services/risk.js";
 import { audit } from "../services/audit.js";

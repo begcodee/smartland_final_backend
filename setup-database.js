@@ -15,18 +15,16 @@ try {
 
 async function setupDatabase() {
   const client = await pool.connect();
-  
+
   try {
-    console.log("🔗 Connecting to PostgreSQL...");
-    
-    // Read the schema file
+    console.log("🔗 Connecting to PostgreSQL…");
+
     const __filename = fileURLToPath(import.meta.url);
     const __dirname = dirname(__filename);
-    // Primary: single-row JSON snapshot (matches runtime persistence in index.js).
-    const snapshotPath = join(__dirname, "src", "config", "schema_snapshot.sql");
-    const snapshotSql = readFileSync(snapshotPath, "utf8");
 
-    // Optional relational schema (drops/recreates tables — use only for greenfield SQL-backed apps).
+    const smartlandPath = join(__dirname, "src", "config", "schema_sl.sql");
+    const smartlandSql = readFileSync(smartlandPath, "utf8");
+
     const relationalPath = join(__dirname, "src", "config", "schema.sql");
     let relationalSql = "";
     try {
@@ -34,28 +32,26 @@ async function setupDatabase() {
     } catch {
       relationalSql = "";
     }
-    
-    console.log("📝 Running database schema...");
-    
-    // Execute the schema in a transaction
-    await client.query('BEGIN');
-    await client.query(snapshotSql);
+
+    console.log("📝 Running database schema…");
+
+    await client.query("BEGIN");
+    await client.query(smartlandSql);
     if (process.env.RUN_RELATIONAL_SCHEMA === "1" && relationalSql) {
       console.log("📝 RUN_RELATIONAL_SCHEMA=1 — applying schema.sql (destructive DROP)…");
       await client.query(relationalSql);
     }
-    await client.query('COMMIT');
-    
+    await client.query("COMMIT");
+
     console.log("✅ Database setup completed successfully!");
     console.log("\nCreated / updated:");
-    console.log("  - app_snapshots (JSON application state)");
+    console.log("  - sl_users, sl_parcels, sl_conversations, sl_payments, … (SmartLand relational tables)");
     if (process.env.RUN_RELATIONAL_SCHEMA === "1") {
-      console.log("  - users, lands, payments, … (relational schema.sql)");
+      console.log("  - legacy users, lands, … (schema.sql)");
     }
-    console.log("\nStart the API with Postgres env vars set — state persists automatically.");
-    
+    console.log("\nStart the API with DATABASE_URL set — state persists to sl_* tables.");
   } catch (error) {
-    await client.query('ROLLBACK');
+    await client.query("ROLLBACK");
     console.error("❌ Error setting up database:");
     console.error(error.message);
     process.exit(1);

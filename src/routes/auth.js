@@ -4,7 +4,7 @@ import { z } from "zod";
 
 import { seedIfEmpty, store, publicUser } from "../store.js";
 import { signToken, authenticate } from "../auth.js";
-import { persistStoreNow } from "../persistence/storeSnapshot.js";
+import { persistStoreNow } from "../db/relationalStore.js";
 
 const router = express.Router();
 
