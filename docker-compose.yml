@@ -1,0 +1,20 @@
+# Local PostgreSQL for SmartLand snapshot persistence.
+# Usage: docker compose up -d
+# Then set in `.env`: DB_HOST=localhost DB_PORT=5432 DB_USER=smartland DB_PASSWORD=smartland DB_NAME=smartland
+# Run: npm run setup && npm start
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: smartland-postgres
+    environment:
+      POSTGRES_USER: smartland
+      POSTGRES_PASSWORD: smartland
+      POSTGRES_DB: smartland
+    ports:
+      - "5432:5432"
+    volumes:
+      - smartland_pg_data:/var/lib/postgresql/data
+
+volumes:
+  smartland_pg_data:
