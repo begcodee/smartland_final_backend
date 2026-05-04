@@ -1,7 +1,7 @@
 import express from "express";
 import { authenticate, requireRole } from "../auth.js";
 import { seedIfEmpty, store, publicUser } from "../store.js";
-import { persistStoreNow } from "../db/relationalStore.js";
+import { persistStoreNow, upsertUserToDb } from "../db/relationalStore.js";
 import { z } from "zod";
 import { computeRiskScore } from "../services/risk.js";
 import { audit } from "../services/audit.js";
@@ -28,9 +28,16 @@ router.get("/", authenticate, requireRole("lands_commission", "admin"), (_req, r
 router.get("/pending", authenticate, requireRole("lands_commission", "admin"), (_req, res) => {
   seedIfEmpty();
   const pending = Array.from(store.users.values())
-    // Stage 2 gate: Lands Commission sees nothing until identity prescreen (niaStatus) is verified.
-    // (Focus on sellers for document legalization.)
-    .filter((u) => u.role === "seller" && !u.verified && u.niaStatus === "verified")
+    // Accounts awaiting LC full account approval:
+    // - Ghana Card prescreen must be verified (niaStatus === "verified")
+    // - Account not yet approved (verified !== true)
+    // - Any role except LC/admin staff themselves
+    .filter((u) =>
+      u.role !== "admin" &&
+      u.role !== "lands_commission" &&
+      !u.verified &&
+      u.niaStatus === "verified"
+    )
     .map((u) => publicUser(u, _req.user));
   res.json({ success: true, users: pending });
 });
@@ -171,7 +178,10 @@ router.patch("/me", authenticate, async (req, res) => {
     }
   }
 
-  await persistStoreNow(store);
+  // Persist this user immediately — niaStatus, idVerification, riskScore must survive restarts
+  await upsertUserToDb(me).catch((e) =>
+    console.error("[usersCompat] DB persist failed (PATCH /me):", e.message)
+  );
   res.json({ success: true, user: publicUser(me, req.user) });
 });
 
@@ -201,28 +211,39 @@ router.patch("/:id/verify", authenticate, requireRole("lands_commission", "admin
 
   if (action === "reject") {
     target.verified = false;
+    target.verifiedAt = null;
+    target.verifiedBy = null;
     target.rejectionReason = parsed.data.rejectionReason || "Rejected by Lands Commission";
+    target.rejectedAt = new Date().toISOString();
+    target.rejectedBy = req.user.id;
     createNotification({
       userId: target.id,
       type: "error",
       category: "verification",
-      title: "Lands Commission verification rejected",
+      title: "Account verification rejected",
       message: `Your account verification was rejected by the Lands Commission. Reason: ${target.rejectionReason}`,
       actionUrl: "/",
     });
     audit(req, "lands.verify_user.rejected", { targetUserId: target.id, reason: target.rejectionReason });
-    await persistStoreNow(store);
+    // Persist immediately — this is a critical state change
+    await upsertUserToDb(target).catch((e) =>
+      console.error("[verify] DB persist failed (reject):", e.message)
+    );
     return res.json({ success: true, user: publicUser(target, req.user) });
   }
 
+  // approve
   target.verified = true;
+  target.verifiedAt = new Date().toISOString();
+  target.verifiedBy = req.user.id;
+  target.submissionAllowed = true; // ensure seller can submit parcels once verified
   createNotification({
     userId: target.id,
     type: "success",
     category: "verification",
-    title: "Lands Commission verification approved",
+    title: "Account approved by Lands Commission ✅",
     message:
-      "Your account has been approved by the Lands Commission. You can now access full SmartLand features.",
+      "Your account has been verified and approved by the Ghana Lands Commission. You now have full access to SmartLand features.",
     actionUrl:
       target.role === "seller"
         ? "/seller"
@@ -233,7 +254,10 @@ router.patch("/:id/verify", authenticate, requireRole("lands_commission", "admin
             : "/",
   });
   audit(req, "lands.verify_user.approved", { targetUserId: target.id });
-  await persistStoreNow(store);
+  // Persist immediately — this is a critical state change
+  await upsertUserToDb(target).catch((e) =>
+    console.error("[verify] DB persist failed (approve):", e.message)
+  );
   res.json({ success: true, user: publicUser(target, req.user) });
 });
 
