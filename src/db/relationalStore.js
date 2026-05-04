@@ -345,3 +345,70 @@ export async function persistStoreNow(store) {
     console.error("[db] persistStoreNow:", e.message);
   }
 }
+
+/**
+ * Upsert a single user row — used by register so new accounts land in DB immediately
+ * without flushing the entire store (safer, faster, no risk of overwriting other rows).
+ */
+export async function upsertUserToDb(user) {
+  const pool = getPool();
+  if (!pool) return;
+  const profile = userToProfile(user);
+  try {
+    await pool.query(
+      `INSERT INTO sl_users (id, email, password_hash, profile, updated_at)
+       VALUES ($1, $2, $3, $4::jsonb, NOW())
+       ON CONFLICT (id) DO UPDATE SET
+         email        = EXCLUDED.email,
+         password_hash = EXCLUDED.password_hash,
+         profile       = EXCLUDED.profile,
+         updated_at    = NOW()`,
+      [user.id, String(user.email || "").trim().toLowerCase(), user.passwordHash, JSON.stringify(profile)]
+    );
+  } catch (e) {
+    console.error("[db] upsertUserToDb failed:", e.message);
+    throw e;
+  }
+}
+
+/**
+ * Look up one user directly from DB by email (case-insensitive).
+ * Returns the full user object (with passwordHash) or null.
+ * Used as a login fallback when the in-memory store doesn't have the user
+ * (e.g. cold-start race, store reload gap).
+ */
+export async function findUserByEmailInDb(email) {
+  const pool = getPool();
+  if (!pool) return null;
+  try {
+    const { rows } = await pool.query(
+      `SELECT id, email, password_hash, profile FROM sl_users WHERE LOWER(TRIM(email)) = LOWER(TRIM($1)) LIMIT 1`,
+      [String(email || "").trim()]
+    );
+    if (!rows.length) return null;
+    return rowToUser(rows[0]);
+  } catch (e) {
+    console.error("[db] findUserByEmailInDb failed:", e.message);
+    return null;
+  }
+}
+
+/**
+ * Look up one user directly from DB by id.
+ * Returns the full user object (with passwordHash) or null.
+ */
+export async function findUserByIdInDb(id) {
+  const pool = getPool();
+  if (!pool) return null;
+  try {
+    const { rows } = await pool.query(
+      `SELECT id, email, password_hash, profile FROM sl_users WHERE id = $1 LIMIT 1`,
+      [String(id)]
+    );
+    if (!rows.length) return null;
+    return rowToUser(rows[0]);
+  } catch (e) {
+    console.error("[db] findUserByIdInDb failed:", e.message);
+    return null;
+  }
+}

@@ -4,7 +4,11 @@ import { z } from "zod";
 
 import { seedIfEmpty, store, publicUser } from "../store.js";
 import { signToken, authenticate } from "../auth.js";
-import { persistStoreNow } from "../db/relationalStore.js";
+import {
+  upsertUserToDb,
+  findUserByEmailInDb,
+  findUserByIdInDb,
+} from "../db/relationalStore.js";
 
 const router = express.Router();
 
@@ -24,7 +28,7 @@ const loginSchema = z.object({
   password: z.string().min(1).max(200),
 });
 
-/** Map common frontend field names so login does not fail on shape alone. */
+/** Normalize common frontend field aliases → { email, password }. */
 function normalizeLoginBody(body) {
   if (!body || typeof body !== "object") return body;
   const b = { ...body };
@@ -34,12 +38,12 @@ function normalizeLoginBody(body) {
     b.user_email ??
     (typeof b.username === "string" && String(b.username).includes("@") ? b.username : undefined);
   if (emailish != null && b.email == null) b.email = emailish;
-  const pass =
-    b.password ?? b.pass ?? b.pwd ?? b.userPassword ?? b.user_password;
+  const pass = b.password ?? b.pass ?? b.pwd ?? b.userPassword ?? b.user_password;
   if (pass != null && b.password == null) b.password = pass;
   return b;
 }
 
+/** ──────────────────────── REGISTER ──────────────────────── */
 router.post("/register", async (req, res) => {
   seedIfEmpty();
 
@@ -49,17 +53,25 @@ router.post("/register", async (req, res) => {
   }
   const { name, email, password, phoneNumber, organization, staffId, arbitratorRegNo } = parsed.data;
   const role = parsed.data.role === "admin" ? "lands_commission" : parsed.data.role;
+  const normalizedEmail = String(email).trim().toLowerCase();
 
-  const normalizedEmail = email;
-  const existing = Array.from(store.users.values()).find(
-    (u) => u.email.toLowerCase() === normalizedEmail
+  // Duplicate check: memory store first, then DB (handles cold-start gaps)
+  const inMemory = Array.from(store.users.values()).find(
+    (u) => String(u.email || "").toLowerCase() === normalizedEmail
   );
-  if (existing) return res.status(409).json({ error: "Email already exists" });
+  if (inMemory) return res.status(409).json({ error: "Email already exists" });
+
+  const inDb = await findUserByEmailInDb(normalizedEmail);
+  if (inDb) {
+    // Sync the DB row back into the memory store so subsequent operations see it
+    store.users.set(inDb.id, inDb);
+    return res.status(409).json({ error: "Email already exists" });
+  }
 
   const passwordHash = await bcrypt.hash(String(password), 10);
-  const id = `user_${Math.random().toString(16).slice(2)}${Date.now().toString(16)}`;
+  const uid = `user_${Math.random().toString(16).slice(2)}${Date.now().toString(16)}`;
   const user = {
-    id,
+    id: uid,
     name: String(name).trim(),
     email: normalizedEmail,
     phoneNumber: phoneNumber ? String(phoneNumber) : null,
@@ -70,28 +82,34 @@ router.post("/register", async (req, res) => {
     passwordHash,
     createdAt: new Date().toISOString(),
     verified: false,
-    // State-aware routing: user has not submitted Ghana Card yet.
     niaStatus: null,
     niaReferenceId: null,
     niaVerifiedAt: null,
     idVerification: null,
-    // Community-driven scores start unscored (0) and grow via ratings after transactions.
     reputation: { score: 0, totalTransactions: 0, successfulTransactions: 0, disputesWon: 0, communityVotes: 0 },
     creditScore: { score: 0, rating: "Unscored", paymentHistory: 0, creditUtilization: 0, lengthOfHistory: 0, newCredit: 0, creditMix: 0 },
   };
 
+  // 1. Persist to DB first — this is the source of truth
+  try {
+    await upsertUserToDb(user);
+  } catch (e) {
+    console.error("[register] DB write failed:", e.message);
+    return res.status(500).json({ error: "Registration failed. Please try again." });
+  }
+
+  // 2. Add to in-memory store
   store.users.set(user.id, user);
-  await persistStoreNow(store);
 
   const token = signToken(user);
   res.status(201).json({
     token,
     user: publicUser(user, { id: user.id, role: user.role }),
-    message:
-      "Account created. Verification takes 24–48 hours. You will receive an email/SMS update once complete.",
+    message: "Account created successfully.",
   });
 });
 
+/** ──────────────────────── LOGIN ──────────────────────── */
 router.post("/login", async (req, res) => {
   seedIfEmpty();
 
@@ -99,51 +117,47 @@ router.post("/login", async (req, res) => {
   if (!parsed.success) {
     return res.status(400).json({
       error: "Invalid payload",
-      hint: "Send JSON with email (or userEmail / username if it is an email) and password.",
+      hint: "Send JSON with 'email' and 'password'.",
       details: parsed.error.flatten(),
     });
   }
   const { email, password } = parsed.data;
+  const normalizedEmail = String(email).trim().toLowerCase();
 
-  const normalizedEmail = email;
-  const user = Array.from(store.users.values()).find(
-    (u) => u.email.toLowerCase() === normalizedEmail
+  // Primary: memory store (fast path — populated at startup from DB)
+  let user = Array.from(store.users.values()).find(
+    (u) => String(u.email || "").toLowerCase() === normalizedEmail
   );
+
+  // Fallback: direct DB lookup — handles Render cold-starts, store-reload gaps,
+  // or a user who registered on a different instance
   if (!user) {
-    const prodLike =
-      process.env.NODE_ENV === "production" || String(process.env.RENDER || "").toLowerCase() === "true";
-    if (prodLike && store.users.size === 0) {
-      return res.status(401).json({
-        error: "Invalid credentials",
-        message:
-          "No accounts exist on this server yet. Register with POST /api/auth/register, or set BOOTSTRAP_ADMIN_EMAIL and BOOTSTRAP_ADMIN_PASSWORD on Render and redeploy once.",
-      });
+    user = await findUserByEmailInDb(normalizedEmail);
+    if (user) {
+      // Sync back into memory so subsequent requests are fast
+      store.users.set(user.id, user);
     }
-    return res.status(401).json({
-      error: "Invalid credentials",
-      hint: "No user with this email. On production, create an account first (POST /api/auth/register) or use a row that exists in the database.",
-    });
+  }
+
+  if (!user) {
+    return res.status(401).json({ error: "Invalid credentials" });
   }
 
   if (!user.passwordHash) {
     return res.status(401).json({
       error: "Invalid credentials",
-      message: "This account has no password hash (legacy row). Reset by re-registering or updating the user in the database.",
+      hint: "This account has no password. Run npm run db:ensure-admin or re-register.",
     });
   }
 
   const ok = await bcrypt.compare(String(password), user.passwordHash);
   if (!ok) {
-    return res.status(401).json({
-      error: "Invalid credentials",
-      hint: "Password does not match this account. If the account was created outside this API, the hash format may differ—reset password by registering a new user or updating password_hash in sl_users.",
-    });
+    return res.status(401).json({ error: "Invalid credentials" });
   }
 
   if (user.role === "nia") {
     return res.status(403).json({
-      error:
-        "The NIA role is not used. Log in with a Ghana Lands Commission (lands_commission) or admin account.",
+      error: "The NIA role is no longer used. Log in with a Lands Commission or admin account.",
     });
   }
 
@@ -151,8 +165,16 @@ router.post("/login", async (req, res) => {
   res.json({ token, user: publicUser(user, { id: user.id, role: user.role }) });
 });
 
-router.get("/me", authenticate, (req, res) => {
-  res.json(req.user);
+/** ──────────────────────── GET /me ──────────────────────── */
+router.get("/me", authenticate, async (req, res) => {
+  // Always return the freshest profile: check memory first, re-sync from DB if stale
+  let user = store.users.get(req.user.id);
+  if (!user) {
+    user = await findUserByIdInDb(req.user.id);
+    if (!user) return res.status(404).json({ error: "User not found" });
+    store.users.set(user.id, user);
+  }
+  res.json(publicUser(user, { id: user.id, role: user.role }));
 });
 
 export default router;
