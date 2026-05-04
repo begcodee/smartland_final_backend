@@ -1,6 +1,8 @@
 /**
- * Mock Ghana Card PIN ledger — IVS-style simulation used by Lands Commission prescreening.
- * PIN must match Ghana Card format and exist in this ledger for Protocol A "handshake".
+ * Mock Ghana Card PIN ledger — simulated Ghana Card database used by the
+ * Ghana Lands Commission during identity prescreening.
+ * PIN must match Ghana Card format and exist here for Protocol A "handshake".
+ * In production this would be the actual GhanaCard IVS API.
  */
 export const MOCK_NIA_LEDGER = [
   { pin: "GHA-482951734-1", fullName: "Ama Mensah" },

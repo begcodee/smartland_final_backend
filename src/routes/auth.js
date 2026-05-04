@@ -158,7 +158,8 @@ router.post("/login", async (req, res) => {
 
   if (user.role === "nia") {
     return res.status(403).json({
-      error: "The NIA role is no longer used. Log in with a Lands Commission or admin account.",
+      error:
+        "The NIA role has been retired. Ghana Card and land document verification is handled exclusively by the Ghana Lands Commission. Use a lands_commission or admin account.",
     });
   }
 

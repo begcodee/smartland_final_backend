@@ -7,7 +7,7 @@ export const DASHBOARD_RULES = {
   seller: {
     role: "seller",
     narrative:
-      "Seller / landowner — lists parcels; must pass Protocols A→B (Ghana Card) via mock IVS under Lands Commission rules; parcel listings run Protocol C (land documents) when OCR text is supplied.",
+      "Seller / landowner — lists land parcels; must have Ghana Card AND land documents verified by the Ghana Lands Commission; parcel listings run Protocol C (document OCR) when text is supplied.",
     allowed: [
       "POST /api/parcels (when submissionAllowed + Protocol A satisfied; Protocol C may flag parcel)",
       "POST /api/conversations",
@@ -15,7 +15,7 @@ export const DASHBOARD_RULES = {
       "PATCH /api/users/me (save idVerification + smartlandProtocols)",
     ],
     requiredForAutomatedSettlement: [
-      "niaStatus === verified",
+      "niaStatus === verified (Ghana Card verified by Lands Commission)",
       "smartlandProtocols.protocolA.passed !== false",
       "smartlandProtocols.protocolB.passed === true OR protocolB.skipped with Lands Commission verified override",
       "parcel.protocolC.passed !== false when Protocol C was evaluated",
@@ -25,7 +25,7 @@ export const DASHBOARD_RULES = {
   buyer: {
     role: "buyer",
     narrative:
-      "Purchaser / investor — checkout and transfers; gated by parcel and seller red-flag engine, Lands Commission verification, and seller protocol completeness.",
+      "Purchaser / investor — checkout and transfers; must have Ghana Card verified by Lands Commission; gated by parcel/seller red-flag engine and protocol completeness.",
     allowed: [
       "POST /api/payments/initialize",
       "GET /api/payments/verify",
@@ -41,20 +41,27 @@ export const DASHBOARD_RULES = {
   lands_commission: {
     role: "lands_commission",
     narrative:
-      "Ghana Lands Commission (main registrar admin) — verifies Ghana Card / identity prescreening and land documents for sellers, landowners, buyers, and investors; endorses accounts and registry readiness when checks pass.",
+      "Ghana Lands Commission — sole authority for all identity and land document verification. " +
+      "Buyers/investors: Ghana Card only. Sellers/landowners: Ghana Card + land documents. Arbitrators: Ghana Card only.",
+    verificationByRole: {
+      buyer: ["Ghana Card (Protocol A + B)"],
+      seller: ["Ghana Card (Protocol A + B)", "Land Certificate", "Indenture (Deed/Lease)", "Certified Survey Plan", "Site Plan"],
+      arbitrator: ["Ghana Card (Protocol A + B)"],
+    },
     allowed: [
-      "PATCH /api/users/:id/verify (account + document gate after identity prescreen)",
-      "GET /api/users/pending",
-      "GET /api/lands-commission/users or GET /api/nia/users (same handler; identity prescreen queue)",
-      "POST /api/lands-commission/users/:id/decision or POST /api/nia/users/:id/decision",
-      "GET /api/lands-commission/employees/* or GET /api/nia/employees/*",
-      "GET /api/users (read-only roster)",
-      "Parcel / transfer review aligned with statutory land rules",
+      "POST /api/lands-commission/users/:id/decision  — Ghana Card (+ land docs for sellers) decision",
+      "PATCH /api/users/:id/verify                    — Final account approval/rejection",
+      "GET  /api/lands-commission/users               — Identity verification queue",
+      "GET  /api/users/pending                        — Accounts awaiting full approval",
+      "GET  /api/users                                — Full user roster",
+      "GET  /api/parcels                              — All parcels (any status)",
+      "PATCH /api/parcels/:id/review                  — Approve/reject parcel listing",
+      "POST /api/parcels/:id/unlock-fraud             — Release fraud lock after investigation",
     ],
-    blockingRules: ["Users with niaStatus !== verified cannot receive LC account approval (field name retained for API compatibility)"],
-    obligations: [
-      "Verify Ghana Card IVS prescreening and resolve suspicious identity signals",
-      "Verify land instruments / listing documents before clearing sellers and investors for transaction",
+    blockingRules: [
+      "Sellers cannot list parcels until both Ghana Card AND land documents are LC-verified",
+      "Buyers cannot transact until Ghana Card is LC-verified",
+      "Parcels are not visible to buyers until LC approves them",
     ],
   },
 

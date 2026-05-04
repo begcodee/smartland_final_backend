@@ -8,20 +8,53 @@ import { upsertUserToDb } from "../db/relationalStore.js";
 
 const router = express.Router();
 
-// Ghana Lands Commission verifies Ghana Card prescreening (niaStatus) for buyers and sellers.
-// Routes stay under /api/nia for compatibility; mirror: /api/lands-commission (see index.js).
+/**
+ * Verification requirements by role (Lands Commission policy):
+ *   buyer / investor  → Ghana Card only
+ *   seller / owner    → Ghana Card + land documents
+ *   arbitrator        → Ghana Card only
+ *   admin / LC        → pre-verified (not in this queue)
+ */
+function verificationRequirementsForRole(role) {
+  const base = { ghanaCard: true };
+  return role === "seller" ? { ...base, landDocuments: true } : base;
+}
+
+function buildVerificationStatus(user) {
+  const req = verificationRequirementsForRole(user.role);
+  const iv = user.idVerification || {};
+  const ghanaCardSubmitted = Boolean(iv.ghanaCard?.cardNumber || iv.cardNumber);
+  const landDocsSubmitted = Boolean(
+    iv.landDocuments?.length ||
+    iv.landCertificate ||
+    iv.indenture ||
+    iv.surveyPlan ||
+    iv.sitePlan
+  );
+  return {
+    requires: req,
+    ghanaCardSubmitted,
+    landDocumentsSubmitted: req.landDocuments ? landDocsSubmitted : null,
+    readyForDecision:
+      ghanaCardSubmitted && (!req.landDocuments || landDocsSubmitted),
+  };
+}
+
+// Ghana Lands Commission identity verification queue
+// Mounted at both /api/nia/users and /api/lands-commission/users (same handler).
 router.get("/users", authenticate, requireRole("lands_commission", "admin"), (_req, res) => {
   seedIfEmpty();
   const queue = Array.from(store.users.values())
     .filter((u) => {
       if (u.role === "admin" || u.role === "lands_commission") return false;
-      // Show users who are pending Ghana Card verification (niaStatus=pending)
-      // OR who have submitted idVerification but niaStatus is still null (just registered + submitted)
       if (u.niaStatus === "pending") return true;
-      if (u.niaStatus === null && u.idVerification) return true;
+      if ((u.niaStatus === null || u.niaStatus === undefined) && u.idVerification) return true;
       return false;
     })
-    .map((u) => publicUser(u, _req.user));
+    .map((u) => ({
+      ...publicUser(u, _req.user),
+      verificationStatus: buildVerificationStatus(u),
+    }));
   res.json({ success: true, users: queue });
 });
 
@@ -34,11 +67,11 @@ router.post("/users/:id/decision", authenticate, requireRole("lands_commission",
     .object({
       decision: z.enum(["verified", "rejected"]).optional(),
       action: z.enum(["verify", "reject"]).optional(),
+      rejectionReason: z.string().max(500).optional(),
     })
     .safeParse(req.body);
-  if (!parsed.success) {
-    return res.status(400).json({ error: "Invalid payload" });
-  }
+  if (!parsed.success) return res.status(400).json({ error: "Invalid payload" });
+
   const decision =
     parsed.data.decision ??
     (parsed.data.action === "verify"
@@ -46,52 +79,88 @@ router.post("/users/:id/decision", authenticate, requireRole("lands_commission",
       : parsed.data.action === "reject"
         ? "rejected"
         : null);
-  if (!decision) return res.status(400).json({ error: "action/decision is required" });
+  if (!decision) return res.status(400).json({ error: "action or decision is required" });
+
+  // Role-based requirement check: sellers must have submitted land documents too
+  const vs = buildVerificationStatus(target);
+  if (decision === "verified" && !vs.readyForDecision) {
+    const missing = [];
+    if (!vs.ghanaCardSubmitted) missing.push("Ghana Card");
+    if (target.role === "seller" && !vs.landDocumentsSubmitted) missing.push("Land Documents");
+    return res.status(400).json({
+      error: "Cannot verify — required documents not submitted by applicant",
+      missing,
+      verificationStatus: vs,
+      hint: `${target.role === "seller" ? "Sellers" : "This user"} must submit: ${Object.keys(vs.requires).join(", ")}`,
+    });
+  }
 
   target.niaStatus = decision;
-  target.niaReferenceId = `NIA_${Math.random().toString(16).slice(2)}${Date.now().toString(16)}`;
+  target.lcVerificationId = `LC_${Math.random().toString(16).slice(2)}${Date.now().toString(16)}`;
+  target.niaReferenceId = target.lcVerificationId; // backward compat alias
   target.niaVerifiedAt = new Date().toISOString();
+  target.lcVerifiedAt = target.niaVerifiedAt;
   target.niaDecidedBy = req.user.id;
-  // Ghana Card verification is issued by Lands Commission in this deployment.
-  if (decision === "rejected") target.verified = false;
+  if (decision === "rejected") {
+    target.verified = false;
+    target.lcRejectionReason = parsed.data.rejectionReason || "Ghana Card or documents rejected by Lands Commission";
+  }
+
+  const roleLabel = target.role === "seller" ? "seller / landowner" : target.role;
 
   if (decision === "verified") {
-    // Notify Lands Commission admins that this user is ready for account document review.
-    const admins = Array.from(store.users.values()).filter((u) => u.role === "lands_commission" || u.role === "admin");
+    const admins = Array.from(store.users.values()).filter(
+      (u) => u.role === "lands_commission" || u.role === "admin"
+    );
     for (const a of admins) {
       createNotification({
         userId: a.id,
         type: "info",
         category: "verification",
-        title: "Ghana Card prescreening passed — ready for account approval",
-        message: `${target.name} (${target.email}) passed Ghana Card verification. Review their account documents and approve/reject via PATCH /api/users/${target.id}/verify.`,
+        title: `Ghana Card verified — ready for account approval (${roleLabel})`,
+        message: `${target.name} (${target.email}, ${roleLabel}) passed Ghana Card verification. ` +
+          `${target.role === "seller" ? "Land documents also submitted. " : ""}` +
+          `Approve their account via PATCH /api/users/${target.id}/verify.`,
         actionUrl: "/admin",
       });
     }
   }
 
-  // Notify the applicant.
+  const docNote = target.role === "seller"
+    ? " Your Ghana Card and land documents have been reviewed."
+    : " Your Ghana Card has been reviewed.";
+
   createNotification({
     userId: target.id,
     type: decision === "verified" ? "success" : "error",
     category: "verification",
-    title: decision === "verified" ? "Ghana Card prescreening approved" : "Ghana Card prescreening rejected",
-    message:
-      decision === "verified"
-        ? "Your Ghana Card prescreening has been approved by Lands Commission. Lands Commission will now review and approve your account."
-        : "Your Ghana Card prescreening was rejected. Please resubmit with correct details.",
-    actionUrl: decision === "verified" ? "/" : "/",
+    title: decision === "verified"
+      ? "Ghana Lands Commission — identity verification passed"
+      : "Ghana Lands Commission — identity verification rejected",
+    message: decision === "verified"
+      ? `Your identity verification has been approved by the Ghana Lands Commission.${docNote} Your account is now awaiting final approval.`
+      : `Your identity verification was rejected by the Ghana Lands Commission. Reason: ${target.lcRejectionReason}. Please resubmit.`,
+    actionUrl: "/",
   });
 
-  audit(req, "lands.identity.queue_decision", { targetUserId: target.id, decision });
+  audit(req, "lc.identity.verification_decision", {
+    targetUserId: target.id,
+    role: target.role,
+    decision,
+    requirementsChecked: vs.requires,
+  });
 
-  // ── CRITICAL: Persist immediately to database ──────────────────────────
-  // Without this, the niaStatus change is lost on server restart (Render cold start).
+  // Persist immediately — critical state change must survive server restarts
   upsertUserToDb(target).catch((e) =>
-    console.error("[nia] Failed to persist decision to DB for user", target.id, e.message)
+    console.error("[lc-verify] DB persist failed for user", target.id, e.message)
   );
 
-  res.json({ success: true, user: publicUser(target, req.user) });
+  res.json({
+    success: true,
+    decision,
+    verificationStatus: buildVerificationStatus(target),
+    user: publicUser(target, req.user),
+  });
 });
 
 export default router;

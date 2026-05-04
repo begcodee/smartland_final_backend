@@ -46,7 +46,7 @@ export function authenticate(req, res, next) {
     if (user.role === "nia") {
       return res.status(403).json({
         error:
-          "The NIA role is not used. Sign in with a Ghana Lands Commission (lands_commission) or admin account to verify Ghana Card prescreening and land documents.",
+          "The NIA role has been retired. Ghana Card and land document verification is handled exclusively by the Ghana Lands Commission. Sign in with a lands_commission or admin account.",
       });
     }
     // Self view: keep full identity for accountability

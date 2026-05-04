@@ -18,7 +18,7 @@ export function sellerProtocolsAllowTransaction(user) {
 
   const sp = getSmartlandProtocols(user);
 
-  if (user.niaStatus !== "verified") reasons.push("NIA_NOT_VERIFIED");
+  if (user.niaStatus !== "verified") reasons.push("LC_IDENTITY_NOT_VERIFIED");
 
   if (strict && !sp) reasons.push("PROTOCOL_SNAPSHOT_REQUIRED");
 
@@ -27,7 +27,7 @@ export function sellerProtocolsAllowTransaction(user) {
   const pb = sp?.protocolB;
   if (pb && pb.skipped === true) {
     /* Manual LC review path — still requires identity prescreen (niaStatus) verified */
-    if (user.niaStatus !== "verified") reasons.push("PROTOCOL_B_PENDING_MANUAL_NIA");
+    if (user.niaStatus !== "verified") reasons.push("PROTOCOL_B_PENDING_LC_REVIEW");
   } else if (pb && pb.passed === false) {
     reasons.push("PROTOCOL_B_BIOMETRIC_FAILED");
   }

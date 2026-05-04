@@ -164,7 +164,7 @@ export class LandConflictEngine {
 
     const identityValid = await this.verifyIdentity(tx.seller_id);
     if (!identityValid) {
-      flags.push("NIA_IDENTITY_NOT_VERIFIED");
+      flags.push("LC_IDENTITY_NOT_VERIFIED");
       riskScore += W.IDENTITY_NOT_VERIFIED;
     }
 
@@ -181,16 +181,16 @@ export class LandConflictEngine {
           flags.push("BIOMETRIC_BINDING_FAILED");
           riskScore += 55;
         }
-        if (sg.reasons.includes("PROTOCOL_B_PENDING_MANUAL_NIA")) {
-          flags.push("PROTOCOL_B_PENDING_MANUAL_NIA");
+        if (sg.reasons.includes("PROTOCOL_B_PENDING_LC_REVIEW")) {
+          flags.push("PROTOCOL_B_PENDING_LC_REVIEW");
           riskScore += 42;
         }
         if (sg.reasons.includes("PROTOCOL_SNAPSHOT_REQUIRED")) {
           flags.push("PROTOCOL_SNAPSHOT_REQUIRED");
           riskScore += 38;
         }
-        if (sg.reasons.includes("NIA_NOT_VERIFIED") && !flags.includes("NIA_IDENTITY_NOT_VERIFIED")) {
-          flags.push("NIA_NOT_VERIFIED");
+        if (sg.reasons.includes("LC_IDENTITY_NOT_VERIFIED") && !flags.includes("LC_IDENTITY_NOT_VERIFIED")) {
+          flags.push("LC_IDENTITY_NOT_VERIFIED");
           riskScore += W.IDENTITY_NOT_VERIFIED;
         }
       }
@@ -232,11 +232,11 @@ export class LandConflictEngine {
     const pillarRedFlag =
       flags.includes("SELLER_NOT_REGISTERED_OWNER") ||
       flags.includes("REGISTRY_NOT_CLEAR") ||
-      flags.includes("NIA_IDENTITY_NOT_VERIFIED") ||
+      flags.includes("LC_IDENTITY_NOT_VERIFIED") ||
       flags.includes("PROTOCOL_A_FAILED") ||
       flags.includes("BIOMETRIC_BINDING_FAILED") ||
       flags.includes("LAND_DOCUMENT_UNVERIFIED") ||
-      flags.includes("PROTOCOL_B_PENDING_MANUAL_NIA") ||
+      flags.includes("PROTOCOL_B_PENDING_LC_REVIEW") ||
       flags.includes("PROTOCOL_SNAPSHOT_REQUIRED");
 
     if (riskScore >= 70) {

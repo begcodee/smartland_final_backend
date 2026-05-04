@@ -152,10 +152,10 @@ router.post("/", authenticate, requireRole("seller", "lands_commission", "admin"
   // Parcel submission gate (KYC/risk must allow)
   if (actor?.role === "seller") {
     if (actor.niaStatus !== "verified" && actor.niaStatus != null) {
-      audit(req, "parcel.create.blocked", { reason: "nia_not_verified" });
+      audit(req, "parcel.create.blocked", { reason: "lc_identity_not_verified" });
       return res.status(403).json({
         success: false,
-        message: "Parcel submission blocked: Ghana Card prescreen must be verified by Lands Commission.",
+        message: "Parcel submission blocked: Ghana Card and land documents must be verified by the Ghana Lands Commission before you can list a parcel.",
       });
     }
     // Only block if explicitly set false by risk/admin — undefined (new seller) means not yet assessed → allow

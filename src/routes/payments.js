@@ -20,9 +20,9 @@ function redFlagFromEvaluation(evaluation) {
     "BIOMETRIC_BINDING_FAILED",
     "PROTOCOL_A_FAILED",
     "LAND_DOCUMENT_UNVERIFIED",
-    "PROTOCOL_B_PENDING_MANUAL_NIA",
+    "PROTOCOL_B_PENDING_LC_REVIEW",
     "PROTOCOL_SNAPSHOT_REQUIRED",
-    "NIA_IDENTITY_NOT_VERIFIED",
+    "LC_IDENTITY_NOT_VERIFIED",
     "TITLE_CHAIN_GAP",
     "GEOMETRIC_OVERLAP_DETECTED",
     "ACTIVE_TRANSACTION_EXISTS",
@@ -33,11 +33,11 @@ function redFlagFromEvaluation(evaluation) {
     BIOMETRIC_BINDING_FAILED: "Biometric binding failed (Protocol B). Automated settlement is paused pending arbitrator review.",
     PROTOCOL_A_FAILED: "Ghana Card IVS simulation failed (Protocol A). Automated settlement is paused pending review.",
     LAND_DOCUMENT_UNVERIFIED: "Land document verification failed (Protocol C). Automated settlement is paused pending review.",
-    PROTOCOL_B_PENDING_MANUAL_NIA:
+    PROTOCOL_B_PENDING_LC_REVIEW:
       "Biometric verification requires manual Lands Commission review. Automated settlement is paused.",
     PROTOCOL_SNAPSHOT_REQUIRED: "Verification protocol snapshot missing. Automated settlement is paused pending review.",
-    NIA_IDENTITY_NOT_VERIFIED:
-      "Seller identity prescreen is not verified by Lands Commission. Automated settlement is paused.",
+    LC_IDENTITY_NOT_VERIFIED:
+      "Seller identity has not been verified by the Ghana Lands Commission. Automated settlement is paused.",
     TITLE_CHAIN_GAP: "Title chain inconsistency detected. Automated settlement is paused pending review.",
     GEOMETRIC_OVERLAP_DETECTED: "Geometric overlap risk detected. Automated settlement is paused pending review.",
     ACTIVE_TRANSACTION_EXISTS: "An active transaction/lock exists for this parcel. Automated settlement is paused.",

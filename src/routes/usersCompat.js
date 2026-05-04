@@ -202,10 +202,13 @@ router.patch("/:id/verify", authenticate, requireRole("lands_commission", "admin
   const action = parsed.data.action || "approve";
 
   if (target.niaStatus !== "verified") {
-    audit(req, "lands.verify_user.blocked", { targetUserId: target.id, niaStatus: target.niaStatus });
+    audit(req, "lc.verify_user.blocked", { targetUserId: target.id, niaStatus: target.niaStatus });
     return res.status(400).json({
-      error: "User cannot be approved until Lands Commission Ghana Card prescreening is successful",
-      niaStatus: target.niaStatus,
+      error: "User cannot be approved until Ghana Lands Commission identity verification (Ghana Card" +
+        (target.role === "seller" ? " + land documents" : "") +
+        ") is completed first via POST /api/lands-commission/users/:id/decision",
+      identityVerificationStatus: target.niaStatus || "not_submitted",
+      role: target.role,
     });
   }
 

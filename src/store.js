@@ -65,7 +65,7 @@ export const store = {
   payments: new Map(), // reference -> payment record
   transfers: new Map(), // id -> transfer record
   ratings: [], // array of { id, fromUserId, toUserId, stars, context, createdAt }
-  niaEmployees: new Map(), // staffId -> employee
+  niaEmployees: new Map(), // staffId -> LC staff / Ghana Card verifier registry (table: sl_nia_employees)
   employeeAttempts: [], // array audit log
   auditLogs: [],
   notifications: [],
