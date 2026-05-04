@@ -379,17 +379,27 @@ export async function upsertUserToDb(user) {
  */
 export async function findUserByEmailInDb(email) {
   const pool = getPool();
-  if (!pool) return null;
+  if (!pool) {
+    console.warn("[db] findUserByEmailInDb: no pool available — DB not connected");
+    return null;
+  }
+  const client = await pool.connect().catch((e) => {
+    console.error("[db] findUserByEmailInDb: pool.connect failed:", e.message);
+    return null;
+  });
+  if (!client) return null;
   try {
-    const { rows } = await pool.query(
+    const { rows } = await client.query(
       `SELECT id, email, password_hash, profile FROM sl_users WHERE LOWER(TRIM(email)) = LOWER(TRIM($1)) LIMIT 1`,
       [String(email || "").trim()]
     );
     if (!rows.length) return null;
     return rowToUser(rows[0]);
   } catch (e) {
-    console.error("[db] findUserByEmailInDb failed:", e.message);
+    console.error("[db] findUserByEmailInDb query failed:", e.message);
     return null;
+  } finally {
+    client.release();
   }
 }
 
@@ -400,15 +410,22 @@ export async function findUserByEmailInDb(email) {
 export async function findUserByIdInDb(id) {
   const pool = getPool();
   if (!pool) return null;
+  const client = await pool.connect().catch((e) => {
+    console.error("[db] findUserByIdInDb: pool.connect failed:", e.message);
+    return null;
+  });
+  if (!client) return null;
   try {
-    const { rows } = await pool.query(
+    const { rows } = await client.query(
       `SELECT id, email, password_hash, profile FROM sl_users WHERE id = $1 LIMIT 1`,
       [String(id)]
     );
     if (!rows.length) return null;
     return rowToUser(rows[0]);
   } catch (e) {
-    console.error("[db] findUserByIdInDb failed:", e.message);
+    console.error("[db] findUserByIdInDb query failed:", e.message);
     return null;
+  } finally {
+    client.release();
   }
 }

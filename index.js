@@ -191,23 +191,6 @@ async function bootstrap() {
     res.send("SmartLand API running");
   });
 
-  // ── 404 handler ──────────────────────────────────────────────────────────
-  app.use((req, res) => {
-    res.status(404).json({ error: "Not found", path: req.path });
-  });
-
-  // ── Global error handler — converts unhandled throws to JSON 500 ─────────
-  // eslint-disable-next-line no-unused-vars
-  app.use((err, req, res, _next) => {
-    const status = typeof err.status === "number" ? err.status : 500;
-    const message =
-      process.env.NODE_ENV !== "production"
-        ? (err.message || "Internal server error")
-        : "Internal server error";
-    console.error("[error]", req.method, req.path, err.message || err);
-    res.status(status).json({ error: message });
-  });
-
   app.get("/health", async (_req, res) => {
     const p = getPool();
     let postgres = false;
@@ -225,6 +208,21 @@ async function bootstrap() {
       postgres,
       relationalPersistence: Boolean(p),
     });
+  });
+
+  // ── 404 handler — must come AFTER all named routes ───────────────────────
+  app.use((req, res) => {
+    res.status(404).json({ error: "Not found", path: req.path });
+  });
+
+  // ── Global error handler — converts unhandled throws to JSON 500 ─────────
+  // eslint-disable-next-line no-unused-vars
+  app.use((err, req, res, _next) => {
+    const status = typeof err.status === "number" ? err.status : 500;
+    const isProd = process.env.NODE_ENV === "production" || String(process.env.RENDER || "") === "true";
+    const message = isProd ? "Internal server error" : (err.message || "Internal server error");
+    console.error("[error]", req.method, req.path, err.message || err);
+    res.status(status).json({ error: message });
   });
 
   const PORT = Number(process.env.PORT || 3001);

@@ -50,8 +50,11 @@ export function createPoolConfig() {
     const needsSsl = connectionStringNeedsSsl(url);
     return {
       connectionString: url,
-      max: Number(process.env.DB_POOL_MAX || 10),
-      idleTimeoutMillis: 30_000,
+      // Supabase session-mode pooler allows max 15 connections total.
+      // Keep pool small so local dev + Render don't exhaust it simultaneously.
+      max: Number(process.env.DB_POOL_MAX || 3),
+      idleTimeoutMillis: 10_000,
+      connectionTimeoutMillis: 8_000,
       ssl: needsSsl ? { rejectUnauthorized: false } : undefined,
     };
   }
