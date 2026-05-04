@@ -86,6 +86,10 @@ router.post("/register", async (req, res) => {
     niaReferenceId: null,
     niaVerifiedAt: null,
     idVerification: null,
+    // Sellers can post parcels by default; Lands Commission revokes after risk review
+    submissionAllowed: true,
+    riskScore: null,
+    riskReasons: [],
     reputation: { score: 0, totalTransactions: 0, successfulTransactions: 0, disputesWon: 0, communityVotes: 0 },
     creditScore: { score: 0, rating: "Unscored", paymentHistory: 0, creditUtilization: 0, lengthOfHistory: 0, newCredit: 0, creditMix: 0 },
   };

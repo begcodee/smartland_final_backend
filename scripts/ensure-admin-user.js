@@ -38,6 +38,9 @@ function buildProfile({ userId, email, name, role, staffId, organization }) {
     niaReferenceId: null,
     niaVerifiedAt: now,
     idVerification: null,
+    submissionAllowed: true,
+    riskScore: null,
+    riskReasons: [],
     reputation: {
       score: 0,
       totalTransactions: 0,

@@ -31,14 +31,15 @@ router.post("/", authenticate, requireRole("seller", "lands_commission", "admin"
   const actor = store.users.get(req.user.id);
   // Parcel submission gate (KYC/risk must allow)
   if (actor?.role === "seller") {
-    if (actor.niaStatus !== "verified") {
+    if (actor.niaStatus !== "verified" && actor.niaStatus != null) {
       audit(req, "parcel.create.blocked", { reason: "nia_not_verified" });
       return res.status(403).json({
         success: false,
         message: "Parcel submission blocked: Ghana Card prescreen must be verified by Lands Commission.",
       });
     }
-    if (!actor.submissionAllowed) {
+    // Only block if explicitly set false by risk/admin — undefined (new seller) means not yet assessed → allow
+    if (actor.submissionAllowed === false) {
       audit(req, "parcel.create.blocked", {
         reason: "submission_not_allowed",
         riskScore: actor.riskScore ?? null,
@@ -280,7 +281,7 @@ router.post("/", authenticate, requireRole("seller", "lands_commission", "admin"
     conflictRisk,
     overlap: overlapReport,
   });
-  res.status(201).json(safeParcel(parcel));
+  res.status(201).json(safeParcel(parcel, req.user));
 });
 
 // Lands Commission registry review gate (approve/reject a parcel submission)
