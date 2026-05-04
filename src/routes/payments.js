@@ -6,6 +6,7 @@ import { z } from "zod";
 import { LandConflictEngine } from "../services/landConflictEngine.js";
 import { audit } from "../services/audit.js";
 import { createNotification } from "./notifications.js";
+import { runFraudChecks, applyFraudFindingsToParcel, sendFraudAlerts } from "../services/fraudDetection.js";
 
 const router = express.Router();
 
@@ -156,6 +157,30 @@ router.post("/initialize", authenticate, async (req, res) => {
 
   const parcel = store.parcels.get(parcelId);
   if (!parcel) return res.status(404).json({ error: "Parcel not found" });
+
+  // ── Fraud gate: re-run checks at transaction time ──────────────────────
+  // Catches new fraud signals (e.g. double-sale from concurrent requests)
+  if (parcel.fraudLocked) {
+    return res.status(409).json({
+      success: false,
+      error: "FRAUD_LOCKED",
+      message:
+        "This parcel has been locked due to suspected fraud. " +
+        "The transaction cannot proceed until Lands Commission resolves the investigation.",
+      redFlag: parcel.redFlag,
+    });
+  }
+  const fraudCheck = runFraudChecks(parcel, store);
+  if (!fraudCheck.clean && fraudCheck.action === "BLOCK_AND_LOCK") {
+    applyFraudFindingsToParcel(parcel, fraudCheck);
+    sendFraudAlerts({ parcel, fraudResult: fraudCheck, store, createNotification, audit, req });
+    return res.status(409).json({
+      success: false,
+      error: "FRAUD_DETECTED",
+      message: `Transaction blocked — fraud signals detected: ${fraudCheck.findings.map((f) => f.flag).join(", ")}. Parcel locked pending LC review.`,
+      fraudFindings: fraudCheck.findings.map((f) => ({ flag: f.flag, severity: f.severity, detail: f.detail })),
+    });
+  }
 
   // Conflict-prevention engine (pre-dispute layer): evaluate BEFORE locking/checkout
   const engine = new LandConflictEngine(store);

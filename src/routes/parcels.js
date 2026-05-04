@@ -8,6 +8,11 @@ import crypto from "crypto";
 import { createNotification } from "./notifications.js";
 import { z } from "zod";
 import {
+  runFraudChecks,
+  applyFraudFindingsToParcel,
+  sendFraudAlerts,
+} from "../services/fraudDetection.js";
+import {
   polygonBbox,
   bboxArea,
   bboxIntersectionArea,
@@ -425,38 +430,138 @@ router.post("/", authenticate, requireRole("seller", "lands_commission", "admin"
   const ocrBlob = String(sitePlanOcrText || landDocumentOcrText || "").trim();
   attachProtocolCToParcel(parcel, ocrBlob);
 
+  // ── Fraud Detection ──────────────────────────────────────────────────────
+  // Run all 5 fraud rules before persisting
+  const fraudResult = runFraudChecks(parcel, store);
+  if (!fraudResult.clean) {
+    applyFraudFindingsToParcel(parcel, fraudResult);
+  }
+
   store.parcels.set(parcel.id, parcel);
+
+  // Register document hashes for future forgery detection
+  for (const doc of parcel.documents) {
+    const material = String(doc?.sha256 || doc?.fileId || doc?.url || doc?.name || "").trim();
+    if (!material) continue;
+    const h = crypto.createHash("sha256").update(material).digest("hex");
+    if (!store.documentHashes.has(h)) {
+      store.documentHashes.set(h, {
+        parcelId: parcel.id,
+        docType: doc.type,
+        docName: doc.name,
+        createdAt: new Date().toISOString(),
+      });
+    }
+  }
+
   audit(req, "parcel.created", {
     parcelId: parcel.id,
     geoFingerprint: fingerprint,
     conflictRisk,
     overlap: overlapReport,
     documentBundle: parcel.documentBundle,
+    fraudClean: fraudResult.clean,
+    fraudFlags: fraudResult.findings.map((f) => f.flag),
   });
 
-  // Notify all Lands Commission / admin staff that a new parcel awaits review
-  for (const u of Array.from(store.users.values())) {
-    if (u.role !== "lands_commission" && u.role !== "admin") continue;
-    createNotification({
-      userId: u.id,
-      type: "info",
-      category: "parcel_review",
-      title: "New parcel awaiting review",
-      message: `"${parcel.title}" submitted by ${actor?.name || req.user.email}. All 4 required documents are present. Review and approve/reject.`,
-      actionUrl: "/admin",
-    });
+  // Send fraud alerts (owner + LC + audit trail) if any findings
+  if (!fraudResult.clean) {
+    sendFraudAlerts({ parcel, fraudResult, store, createNotification, audit, req });
   }
 
-  res.status(201).json({
+  // Notify LC for standard review (only if not already fraud-locked)
+  if (fraudResult.clean || fraudResult.action === "FLAG_REVIEW") {
+    for (const u of Array.from(store.users.values())) {
+      if (u.role !== "lands_commission" && u.role !== "admin") continue;
+      createNotification({
+        userId: u.id,
+        type: fraudResult.clean ? "info" : "warning",
+        category: "parcel_review",
+        title: fraudResult.clean
+          ? `New parcel awaiting review: "${parcel.title}"`
+          : `⚠ Parcel flagged for review: "${parcel.title}"`,
+        message: fraudResult.clean
+          ? `Submitted by ${actor?.name || req.user.email}. All 4 required documents present. Please review and approve/reject.`
+          : `Submitted by ${actor?.name || req.user.email}. Fraud indicators detected: ${fraudResult.findings.map((f) => f.flag).join(", ")}. Manual review required.`,
+        actionUrl: "/admin",
+      });
+    }
+  }
+
+  const responseStatus = fraudResult.action === "BLOCK_AND_LOCK" ? 201 : 201;
+  res.status(responseStatus).json({
     success: true,
-    message:
-      "Parcel submitted successfully. It is now pending Lands Commission review. " +
-      "It will become visible to buyers only after approval.",
+    fraudClean: fraudResult.clean,
+    fraudAction: fraudResult.action,
+    fraudFindings: fraudResult.clean ? [] : fraudResult.findings.map((f) => ({
+      flag: f.flag, severity: f.severity, detail: f.detail,
+    })),
+    message: fraudResult.clean
+      ? "Parcel submitted successfully. Pending Lands Commission review. Visible to buyers only after approval."
+      : fraudResult.action === "BLOCK_AND_LOCK"
+        ? `Parcel submission flagged as HIGH/CRITICAL risk (${fraudResult.findings.map((f) => f.flag).join(", ")}). Transaction locked pending LC investigation.`
+        : `Parcel submitted with warnings. LC notified for priority review. Flags: ${fraudResult.findings.map((f) => f.flag).join(", ")}.`,
     parcel: safeParcel(parcel, req.user),
   });
 });
 
-// Lands Commission registry review gate (approve/reject a parcel submission)
+// ─── GET /api/parcels/:id/fraud-report (LC/admin only) ───────────────────
+router.get("/:id/fraud-report", authenticate, requireRole("lands_commission", "admin", "arbitrator"), (req, res) => {
+  seedIfEmpty();
+  const parcel = store.parcels.get(String(req.params.id));
+  if (!parcel) return res.status(404).json({ error: "Parcel not found" });
+  const freshCheck = runFraudChecks(parcel, store);
+  res.json({
+    success: true,
+    parcelId: parcel.id,
+    parcelTitle: parcel.title,
+    fraudLocked: Boolean(parcel.fraudLocked),
+    fraudLockedAt: parcel.fraudLockedAt || null,
+    storedRedFlag: parcel.redFlag || null,
+    freshCheck: {
+      clean: freshCheck.clean,
+      action: freshCheck.action,
+      highestSeverity: freshCheck.highestSeverity,
+      findings: freshCheck.findings,
+      checkedAt: freshCheck.checkedAt,
+    },
+  });
+});
+
+// ─── POST /api/parcels/:id/unlock-fraud (LC/admin only) ──────────────────
+router.post("/:id/unlock-fraud", authenticate, requireRole("lands_commission", "admin"), (req, res) => {
+  seedIfEmpty();
+  const parcel = store.parcels.get(String(req.params.id));
+  if (!parcel) return res.status(404).json({ error: "Parcel not found" });
+
+  const note = String(req.body?.note || "").trim();
+  parcel.fraudLocked = false;
+  parcel.fraudUnlockedAt = new Date().toISOString();
+  parcel.fraudUnlockedBy = req.user.id;
+  parcel.fraudUnlockNote = note;
+  if (parcel.redFlag?.code && parcel.redFlag.code !== "GLC_REJECTED") {
+    parcel.redFlag = null;
+    parcel.registryClearance = "pending";
+  }
+
+  audit(req, "fraud.unlocked", { parcelId: parcel.id, note, unlockedBy: req.user.id });
+
+  const seller = store.users.get(parcel.sellerId);
+  if (seller) {
+    createNotification({
+      userId: seller.id,
+      type: "success",
+      category: "fraud_alert",
+      title: `Fraud hold released: "${parcel.title}"`,
+      message: `Lands Commission has reviewed and cleared the fraud hold on your parcel. ${note ? `Note: ${note}` : ""}`,
+      actionUrl: "/",
+    });
+  }
+
+  res.json({ success: true, message: "Fraud lock removed. Parcel returned to review queue.", parcel: safeParcel(parcel, req.user) });
+});
+
+// ─── Lands Commission registry review gate (approve/reject a parcel submission)
 router.patch(
   "/:id/review",
   authenticate,
