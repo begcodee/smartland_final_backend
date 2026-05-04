@@ -1,4 +1,5 @@
 import express from "express";
+import jwt from "jsonwebtoken";
 import { authenticate, requireRole } from "../auth.js";
 import { seedIfEmpty, store, safeParcel } from "../store.js";
 import { audit } from "../services/audit.js";
@@ -19,11 +20,117 @@ import { maybeRegisterParcelOnChain } from "../services/chainRegistry.js";
 
 const router = express.Router();
 
-router.get("/", (_req, res) => {
+// ─── Required document bundle ──────────────────────────────────────────────
+export const REQUIRED_DOCUMENT_TYPES = [
+  {
+    type: "land_certificate",
+    label: "Land Certificate",
+    description: "Official land title / land certificate issued by Lands Commission",
+  },
+  {
+    type: "indenture",
+    label: "Indenture (Deed of Conveyance / Lease)",
+    description: "Signed indenture, deed of conveyance, or registered lease document",
+  },
+  {
+    type: "survey_plan",
+    label: "Certified Survey Plan",
+    description: "Certified survey plan / site plan stamped by a licensed surveyor",
+  },
+  {
+    type: "site_plan",
+    label: "Site Plan (Geospatial Context)",
+    description: "Geospatial site plan showing plot boundaries and surrounding context",
+  },
+];
+
+const REQUIRED_TYPES = REQUIRED_DOCUMENT_TYPES.map((d) => d.type);
+
+/**
+ * Check that all 4 required document types are present in the submitted documents array.
+ * Returns the list of missing types (empty = all present).
+ */
+function missingRequiredDocumentTypes(documents) {
+  if (!Array.isArray(documents) || documents.length === 0) return [...REQUIRED_TYPES];
+  const submitted = new Set(
+    documents.map((d) => String(d?.type || d?.documentType || d?.docType || "").trim().toLowerCase())
+  );
+  return REQUIRED_TYPES.filter((t) => !submitted.has(t));
+}
+
+// ─── GET /api/parcels/required-documents ──────────────────────────────────
+// Public endpoint — frontend can fetch and render the upload form dynamically
+router.get("/required-documents", (_req, res) => {
+  res.json({
+    success: true,
+    requiredDocuments: REQUIRED_DOCUMENT_TYPES,
+    rule: "All 4 documents must be uploaded. Submission is auto-rejected if any is missing.",
+    order: ["land_certificate", "survey_plan", "site_plan", "indenture"],
+  });
+});
+
+// ─── GET /api/parcels ──────────────────────────────────────────────────────
+// Role-based visibility:
+//   public / buyer     → only "available" (LC-approved) parcels
+//   seller             → own parcels (any status) + available from others
+//   lands_commission / admin / arbitrator → all parcels
+router.get("/", (req, res) => {
   seedIfEmpty();
-  // Public list: neutral anonymity (seller is initials-only)
-  const parcels = Array.from(store.parcels.values()).map((p) => safeParcel(p, { id: null, role: "public" }));
-  res.json(parcels);
+
+  // Optional auth — public browsing still works without a token
+  const authHeader = req.headers.authorization || "";
+  const token = authHeader.startsWith("Bearer ") ? authHeader.slice(7) : null;
+  let viewer = { id: null, role: "public" };
+  if (token) {
+    try {
+      const secret = process.env.JWT_SECRET?.trim() || "dev-secret-change-me";
+      const payload = jwt.verify(token, secret, { algorithms: ["HS256"] });
+      const u = store.users.get(payload.sub);
+      if (u && u.role !== "nia") viewer = { id: u.id, role: u.role };
+    } catch { /* treat as unauthenticated */ }
+  }
+
+  const all = Array.from(store.parcels.values());
+  let visible;
+
+  if (["lands_commission", "admin", "arbitrator"].includes(viewer.role)) {
+    visible = all;
+  } else if (viewer.role === "seller") {
+    visible = all.filter((p) => p.status === "available" || p.sellerId === viewer.id);
+  } else {
+    // buyer / public — only LC-approved parcels
+    visible = all.filter((p) => p.status === "available");
+  }
+
+  res.json(visible.map((p) => safeParcel(p, viewer)));
+});
+
+// ─── GET /api/parcels/:id ─────────────────────────────────────────────────
+router.get("/:id", (req, res) => {
+  seedIfEmpty();
+  const parcel = store.parcels.get(String(req.params.id));
+  if (!parcel) return res.status(404).json({ error: "Parcel not found" });
+
+  const authHeader = req.headers.authorization || "";
+  const token = authHeader.startsWith("Bearer ") ? authHeader.slice(7) : null;
+  let viewer = { id: null, role: "public" };
+  if (token) {
+    try {
+      const secret = process.env.JWT_SECRET?.trim() || "dev-secret-change-me";
+      const payload = jwt.verify(token, secret, { algorithms: ["HS256"] });
+      const u = store.users.get(payload.sub);
+      if (u && u.role !== "nia") viewer = { id: u.id, role: u.role };
+    } catch { /* unauthenticated */ }
+  }
+
+  // Access control: non-staff can only view available parcels (or own)
+  const isStaff = ["lands_commission", "admin", "arbitrator"].includes(viewer.role);
+  const isOwner = viewer.id && parcel.sellerId === viewer.id;
+  if (!isStaff && !isOwner && parcel.status !== "available") {
+    return res.status(404).json({ error: "Parcel not found" });
+  }
+
+  res.json(safeParcel(parcel, viewer));
 });
 
 router.post("/", authenticate, requireRole("seller", "lands_commission", "admin"), (req, res) => {
@@ -68,6 +175,7 @@ router.post("/", authenticate, requireRole("seller", "lands_commission", "admin"
     documents,
     images,
   } = req.body || {};
+
   const locationStr =
     typeof location === "string"
       ? location
@@ -77,6 +185,30 @@ router.post("/", authenticate, requireRole("seller", "lands_commission", "admin"
   const priceVal = Number(priceGhs ?? price);
   if (!title || (!locationStr && !location) || !Number.isFinite(priceVal)) {
     return res.status(400).json({ error: "Missing title, location, or price (priceGhs)" });
+  }
+
+  // ── Mandatory Document Bundle Validation ──────────────────────────────────
+  // All 4 document types are REQUIRED. Submission is auto-rejected if any is missing.
+  const missingDocs = missingRequiredDocumentTypes(documents);
+  if (missingDocs.length > 0) {
+    const labels = missingDocs.map(
+      (t) => REQUIRED_DOCUMENT_TYPES.find((d) => d.type === t)?.label || t
+    );
+    audit(req, "parcel.create.rejected", {
+      reason: "missing_required_documents",
+      missing: missingDocs,
+    });
+    return res.status(400).json({
+      success: false,
+      error: "Incomplete document bundle. Submission rejected.",
+      message:
+        "A valid land submission must include ALL 4 required documents: " +
+        "Land Certificate, Indenture (Deed of Conveyance/Lease), Certified Survey Plan, and Site Plan. " +
+        `Missing: ${labels.join("; ")}.`,
+      requiredDocuments: REQUIRED_DOCUMENT_TYPES,
+      missingTypes: missingDocs,
+      missingLabels: labels,
+    });
   }
 
   // Conflict prevention: compute geo fingerprint + overlap risk (demo uses bbox overlap)
@@ -149,6 +281,17 @@ router.post("/", authenticate, requireRole("seller", "lands_commission", "admin"
   }
 
   const id = `parcel_${Math.random().toString(16).slice(2)}${Date.now().toString(16)}`;
+
+  // Normalise documents: ensure each has type, name, uploadedAt
+  const normalisedDocs = (Array.isArray(documents) ? documents : []).map((d) => ({
+    type: String(d?.type || d?.documentType || d?.docType || ""),
+    name: String(d?.name || d?.filename || d?.label || d?.type || "document"),
+    url: d?.url || d?.fileUrl || null,
+    fileId: d?.fileId || null,
+    sha256: d?.sha256 || null,
+    uploadedAt: new Date().toISOString(),
+  }));
+
   const parcel = {
     id,
     title: String(title),
@@ -158,20 +301,28 @@ router.post("/", authenticate, requireRole("seller", "lands_commission", "admin"
     areaSqm: typeof areaSqm === "number" ? areaSqm : typeof areaSqft === "number" ? Math.round(areaSqft / 10.7639104167) : null,
     areaSqft: typeof areaSqft === "number" ? areaSqft : typeof areaSqm === "number" ? Math.round(areaSqm * 10.7639104167) : null,
     geoAreaSqm,
-    // Government approval layer: new parcels must be reviewed/approved by Lands Commission before listing.
+    // Parcels are NOT visible to buyers until Lands Commission reviews and approves
     status: "pending_glc_review",
     registryClearance: "pending",
     redFlag: null,
     sellerId: req.user.id,
     createdAt: new Date().toISOString(),
     transfers: [],
-    documents: Array.isArray(documents) ? documents : [],
+    documents: normalisedDocs,
     images: Array.isArray(images) ? images : [],
     boundaryPolygon: boundaryPolygon || null,
     bbox,
     geoFingerprint: fingerprint,
     conflictRisk,
     overlap: overlapReport,
+    // Track required bundle fulfilment
+    documentBundle: {
+      land_certificate: normalisedDocs.some((d) => d.type === "land_certificate"),
+      indenture: normalisedDocs.some((d) => d.type === "indenture"),
+      survey_plan: normalisedDocs.some((d) => d.type === "survey_plan"),
+      site_plan: normalisedDocs.some((d) => d.type === "site_plan"),
+      complete: true, // validated above — if we reach here all 4 are present
+    },
   };
 
   // Key Chain security: document fingerprinting (SHA-256)
@@ -280,8 +431,29 @@ router.post("/", authenticate, requireRole("seller", "lands_commission", "admin"
     geoFingerprint: fingerprint,
     conflictRisk,
     overlap: overlapReport,
+    documentBundle: parcel.documentBundle,
   });
-  res.status(201).json(safeParcel(parcel, req.user));
+
+  // Notify all Lands Commission / admin staff that a new parcel awaits review
+  for (const u of Array.from(store.users.values())) {
+    if (u.role !== "lands_commission" && u.role !== "admin") continue;
+    createNotification({
+      userId: u.id,
+      type: "info",
+      category: "parcel_review",
+      title: "New parcel awaiting review",
+      message: `"${parcel.title}" submitted by ${actor?.name || req.user.email}. All 4 required documents are present. Review and approve/reject.`,
+      actionUrl: "/admin",
+    });
+  }
+
+  res.status(201).json({
+    success: true,
+    message:
+      "Parcel submitted successfully. It is now pending Lands Commission review. " +
+      "It will become visible to buyers only after approval.",
+    parcel: safeParcel(parcel, req.user),
+  });
 });
 
 // Lands Commission registry review gate (approve/reject a parcel submission)
