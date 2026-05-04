@@ -34,6 +34,10 @@ export const store = {
   documentHashes: new Map(),
   /** Image hash registry (sha256 -> { userId, parcelId?, context, createdAt }) */
   imageHashes: new Map(),
+  /** Encrypted file vault (fileId -> meta) */
+  files: new Map(),
+  /** Short-lived download tokens (token -> { fileId, userId, expMs }) */
+  fileTokens: new Map(),
   /** Land / registry policy records (admin-managed) */
   laws: [],
 };

@@ -26,6 +26,7 @@ import ratingRoutes from "./src/routes/ratings.js";
 import transferRoutes from "./src/routes/transfers.js";
 import lawRoutes from "./src/routes/laws.js";
 import arbitrationRoutes from "./src/routes/arbitration.js";
+import fileRoutes from "./src/routes/files.js";
 
 async function bootstrap() {
   const pool = await connectPostgres();
@@ -153,6 +154,7 @@ async function bootstrap() {
   app.use("/api/transfers", transferRoutes);
   app.use("/api/laws", lawRoutes);
   app.use("/api/arbitration", arbitrationRoutes);
+  app.use("/api/files", fileRoutes);
 
   app.get("/", (_req, res) => {
     res.send("SmartLand API running");

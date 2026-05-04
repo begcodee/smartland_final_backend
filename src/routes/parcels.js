@@ -159,11 +159,12 @@ router.post("/", authenticate, requireRole("seller", "lands_commission", "admin"
   const docList = Array.isArray(documents) ? documents : [];
   const duplicates = [];
   for (const d of docList) {
-    const raw =
+    // Prefer server-trustable hashes or file IDs over raw base64 strings
+    const preferred =
       typeof d === "string"
         ? d
-        : String(d?.scannedImage || d?.url || d?.name || "");
-    const material = raw.trim();
+        : String(d?.sha256 || d?.fileId || d?.url || d?.name || "");
+    const material = preferred.trim();
     if (!material) continue;
     const h = crypto.createHash("sha256").update(material).digest("hex");
     if (store.documentHashes.has(h)) {
