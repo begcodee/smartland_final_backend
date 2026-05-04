@@ -9,6 +9,13 @@
     "dev": "node index.js",
     "setup": "node setup-database.js",
     "docker:db": "docker compose up -d",
+    "simulate": "node scripts/simulate.js",
+    "test:lands-chain": "node scripts/test-lands-chain.mjs register",
+    "chain:compile": "hardhat compile --config hardhat.config.mjs",
+    "chain:deploy:local": "hardhat run scripts/deploy-registry.js --network hardhat --config hardhat.config.mjs",
+    "chain:deploy:amoy": "hardhat run scripts/deploy-registry.js --network amoy --config hardhat.config.mjs",
+    "chain:deploy:sepolia": "hardhat run scripts/deploy-registry.js --network sepolia --config hardhat.config.mjs",
+    "chain:deploy:mainnet": "hardhat run scripts/deploy-registry.js --network mainnet --config hardhat.config.mjs",
     "test": "echo \"Error: no test specified\" && exit 1"
   },
   "keywords": [],
@@ -18,18 +25,25 @@
     "node": ">=18.18.0"
   },
   "dependencies": {
+    "@openzeppelin/contracts": "^5.6.1",
     "@supabase/supabase-js": "^2.105.1",
     "@turf/turf": "^7.2.0",
     "bcryptjs": "^2.4.3",
     "cors": "^2.8.5",
     "dotenv": "^17.2.3",
-    "ethers": "^6.15.0",
+    "ethers": "^6.16.0",
     "express": "^5.2.1",
     "express-rate-limit": "^8.1.0",
     "helmet": "^8.1.0",
+    "jose": "^6.2.3",
     "jsonwebtoken": "^9.0.2",
     "nodemailer": "^7.0.6",
     "pg": "^8.17.2",
+    "ws": "^8.20.0",
     "zod": "^4.1.5"
+  },
+  "devDependencies": {
+    "@nomicfoundation/hardhat-toolbox-mocha-ethers": "^3.0.4",
+    "hardhat": "^3.4.3"
   }
 }

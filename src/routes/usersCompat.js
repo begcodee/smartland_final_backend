@@ -20,7 +20,7 @@ function estimateDataUrlBytes(dataUrl) {
   return Math.floor((b64.length * 3) / 4) - pad;
 }
 
-router.get("/", authenticate, requireRole("lands_commission", "admin", "nia"), (_req, res) => {
+router.get("/", authenticate, requireRole("lands_commission", "admin"), (_req, res) => {
   seedIfEmpty();
   res.json({ success: true, users: Array.from(store.users.values()).map((u) => publicUser(u, _req.user)) });
 });
@@ -28,7 +28,7 @@ router.get("/", authenticate, requireRole("lands_commission", "admin", "nia"), (
 router.get("/pending", authenticate, requireRole("lands_commission", "admin"), (_req, res) => {
   seedIfEmpty();
   const pending = Array.from(store.users.values())
-    // Stage 2 gate: Lands Commission sees NOTHING until NIA has verified the applicant.
+    // Stage 2 gate: Lands Commission sees nothing until identity prescreen (niaStatus) is verified.
     // (Focus on sellers for document legalization.)
     .filter((u) => u.role === "seller" && !u.verified && u.niaStatus === "verified")
     .map((u) => publicUser(u, _req.user));

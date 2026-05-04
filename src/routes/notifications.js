@@ -54,6 +54,13 @@ export function createNotification({ userId, type, title, message, category, act
   };
   store.notifications.push(n);
 
+  // Real-time push (WebSocket)
+  try {
+    store.realtime?.sendToUser?.(userId, { type: "notification", notification: n });
+  } catch {
+    // ignore
+  }
+
   // Fire-and-forget email (logs when SMTP/env disabled).
   sendEmail({
     to: user?.email || "",

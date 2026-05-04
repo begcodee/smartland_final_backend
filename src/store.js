@@ -62,22 +62,6 @@ export function seedIfEmpty() {
     verified: false,
   };
 
-  const niaOfficer = {
-    id: id("user"),
-    name: "NIA Officer",
-    email: "nia@nia.gov.gh",
-    phoneNumber: "+233000000002",
-    role: "nia",
-    staffId: "NIA-EMP-2024-001",
-    organization: "National Identification Authority",
-    passwordHash: demoPasswordHash,
-    niaStatus: "verified",
-    niaReferenceId: "NIA-DEMO-OFFICER",
-    niaVerifiedAt: nowIso(),
-    createdAt: nowIso(),
-    verified: true,
-  };
-
   // Extra demo accounts matching the UI "Demo:" line (kept in addition to the generic demo accounts).
   const adminGlc = {
     id: id("user"),
@@ -222,22 +206,6 @@ export function seedIfEmpty() {
     verified: true,
   };
 
-  const niaJojo = {
-    id: id("user"),
-    name: "Jojo Arhin",
-    email: "jojo.arhin@nia.gov.gh",
-    phoneNumber: "+233000001401",
-    role: "nia",
-    staffId: "NIA-EMP-2026-010",
-    organization: "National Identification Authority",
-    passwordHash: demoPasswordHash,
-    niaStatus: "verified",
-    niaReferenceId: "NIA-DEMO-JOJO",
-    niaVerifiedAt: nowIso(),
-    createdAt: nowIso(),
-    verified: true,
-  };
-
   const arbitratorEmmanuella = {
     id: id("user"),
     name: "Emmanuella Addobea",
@@ -335,7 +303,6 @@ export function seedIfEmpty() {
 
   for (const u of [
     admin,
-    niaOfficer,
     buyer,
     seller,
     adminGlc,
@@ -350,7 +317,6 @@ export function seedIfEmpty() {
     buyerPrecious,
     buyerAkua,
     adminFlorence,
-    niaJojo,
     arbitratorEmmanuella,
   ])
     store.users.set(u.id, u);
@@ -514,7 +480,7 @@ function initialsFromName(name) {
 /**
  * Returns a user object safe for the requesting viewer.
  * - Buyers/Sellers/Public only see initials for other users (neutral anonymity).
- * - Staff (admin/lands_commission/nia/arbitrator) sees full profiles.
+ * - Staff (admin/lands_commission/arbitrator) sees full profiles.
  * - Everyone can see their own full profile.
  */
 export function publicUser(user, viewer) {

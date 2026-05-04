@@ -3,7 +3,7 @@ import bcrypt from "bcryptjs";
 import { z } from "zod";
 
 import { seedIfEmpty, store, publicUser } from "../store.js";
-import { signToken, authenticate } from "../auth.js";
+import { signToken, authenticate, isNiaStaffAllowed } from "../auth.js";
 import { persistStoreNow } from "../db/relationalStore.js";
 
 const router = express.Router();
@@ -12,7 +12,7 @@ const registerSchema = z.object({
   name: z.string().trim().min(2).max(100),
   email: z.string().trim().toLowerCase().email(),
   password: z.string().min(8).max(200),
-  role: z.enum(["buyer", "seller", "lands_commission", "admin", "arbitrator", "nia"]),
+  role: z.enum(["buyer", "seller", "lands_commission", "admin", "arbitrator"]),
   phoneNumber: z.string().trim().min(7).max(40).optional().nullable(),
   organization: z.string().trim().min(2).max(200).optional().nullable(),
   staffId: z.string().trim().min(2).max(50).optional().nullable(),
@@ -93,6 +93,12 @@ router.post("/login", async (req, res) => {
 
   const ok = await bcrypt.compare(String(password), user.passwordHash);
   if (!ok) return res.status(401).json({ error: "Invalid credentials" });
+
+  if (user.role === "nia" && !isNiaStaffAllowed()) {
+    return res.status(403).json({
+      error: "The NIA staff persona is disabled. Use a Lands Commission or admin account, or set ALLOW_NIA_STAFF_LOGIN=true on the server.",
+    });
+  }
 
   const token = signToken(user);
   res.json({ token, user: publicUser(user, { id: user.id, role: user.role }) });

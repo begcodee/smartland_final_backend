@@ -16,7 +16,7 @@ export const DASHBOARD_RULES = {
     requiredForAutomatedSettlement: [
       "niaStatus === verified",
       "smartlandProtocols.protocolA.passed !== false",
-      "smartlandProtocols.protocolB.passed === true OR protocolB.skipped with NIA verified override",
+      "smartlandProtocols.protocolB.passed === true OR protocolB.skipped with Lands Commission verified override",
       "parcel.protocolC.passed !== false when Protocol C was evaluated",
     ],
   },
@@ -36,29 +36,23 @@ export const DASHBOARD_RULES = {
     ],
   },
 
-  nia: {
-    role: "nia",
-    narrative: "National ID — simulated IVS queue; officers confirm or reject after Protocol A/B prescreening.",
+  lands_commission: {
+    role: "lands_commission",
+    narrative:
+      "Ghana Lands Commission — operates the simulated Ghana Card IVS queue and land readiness checks; cannot endorse applicants until identity prescreen (niaStatus) is verified.",
     allowed: [
-      "GET /api/nia/users",
+      "PATCH /api/users/:id/verify",
+      "GET /api/users/pending",
+      "GET /api/nia/users (legacy path; identity queue)",
       "POST /api/nia/users/:id/decision",
       "GET /api/nia/employees/*",
       "GET /api/users (read-only roster)",
     ],
-    obligations: [
-      "Reject suspicious identities; approve after mock ledger + biometric pathway",
-      "Notify Lands Commission on verified users",
-    ],
-  },
-
-  lands_commission: {
-    role: "lands_commission",
-    narrative: "Ghana Lands Commission — cannot approve users until NIA verified; endorses land readiness.",
-    allowed: [
-      "PATCH /api/users/:id/verify",
-      "GET /api/users/pending",
-    ],
     blockingRules: ["Users with niaStatus !== verified cannot be approved"],
+    obligations: [
+      "Reject suspicious identities after Protocol A/B prescreening",
+      "Approve listings only after statutory checks",
+    ],
   },
 
   admin: {

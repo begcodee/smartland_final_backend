@@ -235,7 +235,7 @@ router.post("/:id/messages", authenticate, (req, res) => {
   // Secure audio audit: hash + transcript integrity + red-flag keyword watchdog.
   const redFlagTerms = [
     "outside momo",
-    "skip nia",
+    "skip verification",
     "direct payment",
     "cash deal",
     "avoid lands commission",
@@ -282,6 +282,15 @@ router.post("/:id/messages", authenticate, (req, res) => {
   const arr = store.messages.get(convo.id) || [];
   arr.push(msg);
   store.messages.set(convo.id, arr);
+
+  // Real-time push to both parties
+  try {
+    store.realtime?.sendToUser?.(convo.buyerId, { type: "message", conversationId: convo.id, message: msg });
+    store.realtime?.sendToUser?.(convo.sellerId, { type: "message", conversationId: convo.id, message: msg });
+  } catch {
+    // ignore
+  }
+
   res.status(201).json({ success: true, message: msg });
 });
 

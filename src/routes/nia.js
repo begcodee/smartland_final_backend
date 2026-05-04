@@ -1,5 +1,5 @@
 import express from "express";
-import { authenticate, requireRole } from "../auth.js";
+import { authenticate, requireRole, identityQueueRoles } from "../auth.js";
 import { seedIfEmpty, store, publicUser } from "../store.js";
 import { z } from "zod";
 import { audit } from "../services/audit.js";
@@ -7,15 +7,17 @@ import { createNotification } from "./notifications.js";
 
 const router = express.Router();
 
-router.get("/users", authenticate, requireRole("nia"), (_req, res) => {
+// Ghana Card/NIA responsibilities are enforced by Lands Commission in this deployment.
+// NIA role is disabled for production workflow; LC/Admin are authoritative.
+router.get("/users", authenticate, requireRole(...identityQueueRoles()), (_req, res) => {
   seedIfEmpty();
   const pending = Array.from(store.users.values())
-    .filter((u) => u.role !== "nia" && u.role !== "admin" && u.role !== "lands_commission" && u.niaStatus === "pending")
+    .filter((u) => u.role !== "admin" && u.role !== "lands_commission" && u.niaStatus === "pending")
     .map((u) => publicUser(u, _req.user));
   res.json({ success: true, users: pending });
 });
 
-router.post("/users/:id/decision", authenticate, requireRole("nia"), (req, res) => {
+router.post("/users/:id/decision", authenticate, requireRole(...identityQueueRoles()), (req, res) => {
   seedIfEmpty();
   const target = store.users.get(req.params.id);
   if (!target) return res.status(404).json({ error: "User not found" });
@@ -41,7 +43,7 @@ router.post("/users/:id/decision", authenticate, requireRole("nia"), (req, res) 
   target.niaStatus = decision;
   target.niaReferenceId = `NIA_${Math.random().toString(16).slice(2)}${Date.now().toString(16)}`;
   target.niaVerifiedAt = new Date().toISOString();
-  // NIA verification is necessary but not sufficient; Lands Commission still approves final access.
+  // Ghana Card verification is issued by Lands Commission in this deployment.
   if (decision === "rejected") target.verified = false;
 
   if (decision === "verified") {
@@ -52,8 +54,8 @@ router.post("/users/:id/decision", authenticate, requireRole("nia"), (req, res) 
         userId: a.id,
         type: "info",
         category: "verification",
-        title: "NIA verification completed",
-        message: `${target.name} has been verified by NIA. Review documents and approve/reject.`,
+        title: "Ghana Card verification completed",
+        message: `${target.name} has been verified. Review documents and approve/reject.`,
         actionUrl: "/admin",
       });
     }
@@ -64,11 +66,11 @@ router.post("/users/:id/decision", authenticate, requireRole("nia"), (req, res) 
     userId: target.id,
     type: decision === "verified" ? "success" : "error",
     category: "verification",
-    title: decision === "verified" ? "NIA verification approved" : "NIA verification rejected",
+    title: decision === "verified" ? "Verification approved" : "Verification rejected",
     message:
       decision === "verified"
-        ? "Your Ghana Card verification has been approved by NIA. Next: Lands Commission will review and approve your account."
-        : "Your Ghana Card verification was rejected by NIA. Please resubmit with correct details.",
+        ? "Your Ghana Card verification has been approved. Next: Lands Commission will review and approve your account."
+        : "Your Ghana Card verification was rejected. Please resubmit with correct details.",
     actionUrl: decision === "verified" ? "/admin" : "/",
   });
 

@@ -17,7 +17,7 @@ function canAccessFile(user, fileMeta) {
   if (fileMeta.ownerUserId === user.id) return true;
 
   const role = user.role;
-  if (fileMeta.scope === "nia_identity") return role === "nia";
+  if (fileMeta.scope === "nia_identity") return role === "admin" || role === "lands_commission";
   if (fileMeta.scope === "glc_registry") return role === "admin" || role === "lands_commission";
   if (fileMeta.scope === "parcel_docs") {
     if (role === "admin" || role === "lands_commission") return true;

@@ -1,4 +1,33 @@
 import { getPool } from "../config/db.js";
+import { z } from "zod";
+import { registerLand, transferLand } from "../../services/blockchainService.js";
+import { persistLandChainTx } from "../../services/landTxPersistence.js";
+
+const registerChainBodySchema = z.preprocess(
+  (raw) => {
+    const o = raw && typeof raw === "object" ? raw : {};
+    const pid = o.parcelId ?? o.landId ?? o.parcel_id ?? o.land_id;
+    const doc = o.documentHash ?? o.document_hash;
+    return { parcelId: pid, documentHash: doc };
+  },
+  z.object({
+    parcelId: z.union([z.string().regex(/^[1-9]\d*$/), z.number().int().positive()]),
+    documentHash: z.string().trim().min(1).max(8192),
+  })
+);
+
+const transferChainBodySchema = z.preprocess(
+  (raw) => {
+    const o = raw && typeof raw === "object" ? raw : {};
+    const pid = o.parcelId ?? o.landId ?? o.parcel_id ?? o.land_id;
+    const addr = o.newOwnerAddress ?? o.new_owner_address ?? o.wallet_address ?? o.walletAddress;
+    return { parcelId: pid, newOwnerAddress: addr };
+  },
+  z.object({
+    parcelId: z.union([z.string().regex(/^[1-9]\d*$/), z.number().int().positive()]),
+    newOwnerAddress: z.string().regex(/^0x[0-9a-fA-F]{40}$/),
+  })
+);
 
 // GET all lands
 export const getLands = async (req, res) => {
@@ -194,5 +223,86 @@ export const transferLandOwnership = async (req, res) => {
   } catch (error) {
     console.error(error);
     res.status(500).json({ error: "Failed to transfer land ownership" });
+  }
+};
+
+// POST /api/lands/register
+export const registerLandOnChain = async (req, res) => {
+  const pool = getPool();
+  if (!pool) return res.status(503).json({ error: "Database not configured" });
+
+  const parsed = registerChainBodySchema.safeParse(req.body);
+  if (!parsed.success) {
+    return res.status(400).json({
+      error: "Invalid payload",
+      details: parsed.error.issues ?? parsed.error.message,
+    });
+  }
+
+  const parcelId = parsed.data.parcelId;
+  const documentHash = parsed.data.documentHash;
+
+  try {
+    // Ensure land exists in DB (do not change schema)
+    const exists = await pool.query("SELECT id FROM lands WHERE id = $1", [parcelId]);
+    if (exists.rows.length === 0) return res.status(404).json({ error: "Land not found" });
+
+    const txHash = await registerLand(parcelId, documentHash);
+
+    const persisted = await persistLandChainTx(pool, {
+      landId: parcelId,
+      action: "register",
+      txHash,
+    });
+
+    res.json({
+      success: true,
+      message: "Land registered on-chain",
+      txHash,
+      persisted,
+    });
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({ error: error.message || "Blockchain registration failed" });
+  }
+};
+
+// POST /api/lands/transfer
+export const transferLandOnChain = async (req, res) => {
+  const pool = getPool();
+  if (!pool) return res.status(503).json({ error: "Database not configured" });
+
+  const parsed = transferChainBodySchema.safeParse(req.body);
+  if (!parsed.success) {
+    return res.status(400).json({
+      error: "Invalid payload",
+      details: parsed.error.issues ?? parsed.error.message,
+    });
+  }
+
+  const parcelId = parsed.data.parcelId;
+  const newOwnerAddress = parsed.data.newOwnerAddress;
+
+  try {
+    const exists = await pool.query("SELECT id FROM lands WHERE id = $1", [parcelId]);
+    if (exists.rows.length === 0) return res.status(404).json({ error: "Land not found" });
+
+    const txHash = await transferLand(parcelId, newOwnerAddress);
+
+    const persisted = await persistLandChainTx(pool, {
+      landId: parcelId,
+      action: "transfer",
+      txHash,
+    });
+
+    res.json({
+      success: true,
+      message: "Land transfer executed on-chain",
+      txHash,
+      persisted,
+    });
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({ error: error.message || "Blockchain transfer failed" });
   }
 };

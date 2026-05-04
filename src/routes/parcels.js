@@ -5,6 +5,7 @@ import { audit } from "../services/audit.js";
 import { attachProtocolCToParcel } from "../services/sellerProtocolGate.js";
 import crypto from "crypto";
 import { createNotification } from "./notifications.js";
+import { z } from "zod";
 import {
   polygonBbox,
   bboxArea,
@@ -14,6 +15,7 @@ import {
   polygonAreaSqm,
   conflictRiskFromOverlap,
 } from "../services/geo.js";
+import { maybeRegisterParcelOnChain } from "../services/chainRegistry.js";
 
 const router = express.Router();
 
@@ -129,6 +131,22 @@ router.post("/", authenticate, requireRole("seller", "lands_commission", "admin"
     }
   }
 
+  // Fingerprint duplicate listing detector: same geo fingerprint already exists → flag
+  if (fingerprint) {
+    const dupe = Array.from(store.parcels.values()).find(
+      (p) => p.geoFingerprint && String(p.geoFingerprint) === String(fingerprint)
+    );
+    if (dupe) {
+      audit(req, "parcel.create.blocked", { reason: "geo_fingerprint_duplicate", existingParcelId: dupe.id });
+      return res.status(409).json({
+        success: false,
+        message: "Parcel appears to be a duplicate listing (same boundary fingerprint). Manual verification required.",
+        code: "DUPLICATE_GEO_FINGERPRINT",
+        existingParcelId: dupe.id,
+      });
+    }
+  }
+
   const id = `parcel_${Math.random().toString(16).slice(2)}${Date.now().toString(16)}`;
   const parcel = {
     id,
@@ -139,8 +157,9 @@ router.post("/", authenticate, requireRole("seller", "lands_commission", "admin"
     areaSqm: typeof areaSqm === "number" ? areaSqm : typeof areaSqft === "number" ? Math.round(areaSqft / 10.7639104167) : null,
     areaSqft: typeof areaSqft === "number" ? areaSqft : typeof areaSqm === "number" ? Math.round(areaSqm * 10.7639104167) : null,
     geoAreaSqm,
-    status: "available",
-    registryClearance: "clear",
+    // Government approval layer: new parcels must be reviewed/approved by Lands Commission before listing.
+    status: "pending_glc_review",
+    registryClearance: "pending",
     redFlag: null,
     sellerId: req.user.id,
     createdAt: new Date().toISOString(),
@@ -263,6 +282,84 @@ router.post("/", authenticate, requireRole("seller", "lands_commission", "admin"
   });
   res.status(201).json(safeParcel(parcel));
 });
+
+// Lands Commission registry review gate (approve/reject a parcel submission)
+router.patch(
+  "/:id/review",
+  authenticate,
+  requireRole("lands_commission", "admin"),
+  async (req, res) => {
+    seedIfEmpty();
+    const parcel = store.parcels.get(req.params.id);
+    if (!parcel) return res.status(404).json({ error: "Parcel not found" });
+
+    const parsed = z
+      .object({
+        action: z.enum(["approve", "reject"]),
+        note: z.string().trim().max(2000).optional(),
+      })
+      .safeParse(req.body);
+    if (!parsed.success) return res.status(400).json({ error: "Invalid payload" });
+
+    const action = parsed.data.action;
+    const note = parsed.data.note || "";
+
+    parcel.registryReview = parcel.registryReview || {};
+    parcel.registryReview.lastReviewedAt = new Date().toISOString();
+    parcel.registryReview.lastReviewedBy = req.user.id;
+    parcel.registryReview.note = note;
+
+    if (action === "reject") {
+      parcel.registryClearance = "flagged";
+      parcel.status = "disputed";
+      parcel.redFlag = {
+        code: "GLC_REJECTED",
+        message: note || "Rejected by Lands Commission during registry review.",
+        raisedAt: new Date().toISOString(),
+      };
+      audit(req, "parcel.registry.rejected", { parcelId: parcel.id, note });
+      return res.json({ success: true, parcel: safeParcel(parcel, req.user) });
+    }
+
+    // approve
+    parcel.registryClearance = "clear";
+    parcel.status = "available";
+    audit(req, "parcel.registry.approved", { parcelId: parcel.id, note });
+
+    // Ethereum registry integration (v2): register parcel on-chain after Lands Commission approval.
+    // Requires seller wallet address on file + CHAIN_* env.
+    try {
+      const seller = store.users.get(parcel.sellerId) || null;
+      const ownerAddr = seller?.walletAddress || seller?.evmAddress || null;
+      const r = await maybeRegisterParcelOnChain({
+        parcel,
+        ownerAddress: ownerAddr,
+        metadataHash: null,
+      });
+      parcel.chainRegistry = {
+        ...(parcel.chainRegistry || {}),
+        lastAttemptAt: new Date().toISOString(),
+        skipped: Boolean(r?.skipped),
+        reason: r?.reason || null,
+        txHash: r?.txHash || null,
+        parcelIdBytes32: r?.parcelIdBytes32 || null,
+        metadataHash: r?.metadataHash || null,
+      };
+      audit(req, "chain.registry.register_parcel", { parcelId: parcel.id, result: parcel.chainRegistry });
+    } catch (e) {
+      parcel.chainRegistry = {
+        ...(parcel.chainRegistry || {}),
+        lastAttemptAt: new Date().toISOString(),
+        skipped: true,
+        reason: "error",
+        error: String(e?.message || e),
+      };
+      audit(req, "chain.registry.register_parcel_failed", { parcelId: parcel.id, error: parcel.chainRegistry.error });
+    }
+
+    return res.json({ success: true, parcel: safeParcel(parcel, req.user) });
+  }
+);
 
 router.patch(
   "/:id/clear-red-flag",

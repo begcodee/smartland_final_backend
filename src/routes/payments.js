@@ -2,7 +2,6 @@ import express from "express";
 import { authenticate } from "../auth.js";
 import { seedIfEmpty, store } from "../store.js";
 import { initializeTransaction, verifyTransaction } from "../services/paystack.js";
-import { anchorSaleOnChain } from "../services/chainAnchor.js";
 import { z } from "zod";
 import { LandConflictEngine } from "../services/landConflictEngine.js";
 import { audit } from "../services/audit.js";
@@ -291,6 +290,16 @@ router.get("/verify", authenticate, async (req, res) => {
   const existing = store.payments.get(ref);
   if (!existing) return res.status(404).json({ error: "Payment not found" });
 
+  // Authorization: only the buyer who initiated the payment (or registry staff) may verify/finalize.
+  // Prevents an attacker from finalizing someone else's checkout by guessing a reference.
+  const actor = store.users.get(req.user.id) || null;
+  const staffRoles = new Set(["admin", "lands_commission", "arbitrator"]);
+  const isStaff = actor && staffRoles.has(actor.role);
+  if (!isStaff && String(existing.buyerId) !== String(req.user.id)) {
+    audit(req, "payment.verify.forbidden", { reference: ref, buyerId: existing.buyerId });
+    return res.status(403).json({ error: "Forbidden" });
+  }
+
   try {
     let verified;
     if (existing.demo) {
@@ -353,7 +362,10 @@ router.get("/verify", authenticate, async (req, res) => {
           });
         }
 
-        parcel.status = "sold";
+        // Escrow + multisig registry approval gate:
+        // Payment success locks funds, but ownership transfer + on-chain anchoring only occur after
+        // multi-party approval (Lands Commission + neutral arbitrator by default).
+        parcel.status = "pending_transfer_approval";
         parcel.lockedUntil = null;
         const transferId = `transfer_${Math.random().toString(16).slice(2)}${Date.now().toString(16)}`;
         const transfer = {
@@ -363,7 +375,7 @@ router.get("/verify", authenticate, async (req, res) => {
           buyerId: existing.buyerId,
           paystackReference: ref,
           createdAt: new Date().toISOString(),
-          status: "completed",
+          status: "pending_glc_approval",
           chainTxHash: null,
           chainNetwork: null,
           chainSaleId: null,
@@ -373,26 +385,26 @@ router.get("/verify", authenticate, async (req, res) => {
         parcel.transfers = [...(parcel.transfers || []), transfer];
         transferCreatedOrFound = transfer;
 
-        // Notify buyer + seller + Lands Commission/admins when auto-settlement completes.
+        // Notify buyer + seller + Lands Commission/admins that escrow is pending approval.
         const buyer = store.users.get(existing.buyerId) || null;
         const seller = store.users.get(parcel.sellerId) || null;
         if (buyer) {
           createNotification({
             userId: buyer.id,
-            type: "success",
+            type: "info",
             category: "transaction",
-            title: "Purchase completed",
-            message: `Your purchase of “${parcel.title}” has been settled automatically. Transfer ID: ${transfer.id}.`,
+            title: "Payment received — pending registry approval",
+            message: `Your payment for “${parcel.title}” is in escrow. Transfer ID: ${transfer.id}. Lands Commission approval is required before ownership is committed.`,
             actionUrl: "/buyer",
           });
         }
         if (seller) {
           createNotification({
             userId: seller.id,
-            type: "success",
+            type: "info",
             category: "transaction",
-            title: "Sale completed",
-            message: `Your parcel “${parcel.title}” was sold and settled automatically. Transfer ID: ${transfer.id}.`,
+            title: "Payment received — pending registry approval",
+            message: `A buyer paid for “${parcel.title}”. Funds are held in escrow pending Lands Commission approval. Transfer ID: ${transfer.id}.`,
             actionUrl: "/seller",
           });
         }
@@ -404,36 +416,30 @@ router.get("/verify", authenticate, async (req, res) => {
             userId: a.id,
             type: "info",
             category: "transaction",
-            title: "Auto-settlement completed",
-            message: `AUTO settlement completed for parcel “${parcel.title}” (${parcel.id}). Buyer: ${buyer?.email || buyer?.id || "unknown"} · Seller: ${seller?.email || seller?.id || "unknown"} · Transfer: ${transfer.id}.`,
+            title: "Transfer pending approval",
+            message: `Escrow payment received for “${parcel.title}” (${parcel.id}). Review + approve to commit ownership. Buyer: ${buyer?.email || buyer?.id || "unknown"} · Seller: ${seller?.email || seller?.id || "unknown"} · Transfer: ${transfer.id}.`,
             actionUrl: "/admin",
           });
         }
-        audit(req, "settlement.auto.completed", {
+
+        const arbitrators = Array.from(store.users.values()).filter((u) => u.role === "arbitrator");
+        for (const a of arbitrators) {
+          createNotification({
+            userId: a.id,
+            type: "info",
+            category: "arbitration",
+            title: "Transfer awaiting neutral approval",
+            message: `Transfer ${transfer.id} for parcel “${parcel.title}” requires arbitrator approval before finalization.`,
+            actionUrl: "/arbitrator",
+          });
+        }
+        audit(req, "settlement.escrow.pending_approval", {
           parcelId: parcel.id,
           transferId: transfer.id,
           buyerId: existing.buyerId,
           sellerId: parcel.sellerId,
           paystackReference: ref,
         });
-
-        // Anchor on-chain asynchronously (fiat first; chain is proof)
-        anchorSaleOnChain({
-          transfer,
-          parcelId: parcel.id,
-          paystackReference: ref,
-        })
-          .then((anchored) => {
-            if (anchored?.skipped) return;
-            const updated = { ...transfer, ...anchored };
-            store.transfers.set(transfer.id, updated);
-            parcel.transfers = (parcel.transfers || []).map((t) =>
-              t.id === transfer.id ? updated : t
-            );
-          })
-          .catch((err) => {
-            console.warn("[chain] anchor failed", err?.message || err);
-          });
       } else {
         // If already finalized earlier, return the most recent transfer for this reference (if any)
         const maybe = Array.from(store.transfers.values()).find((t) => t.paystackReference === ref);

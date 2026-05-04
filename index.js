@@ -3,6 +3,7 @@ import express from "express";
 import cors from "cors";
 import helmet from "helmet";
 import rateLimit from "express-rate-limit";
+import http from "http";
 
 import { connectPostgres, closePool, getPool } from "./src/config/db.js";
 import { seedIfEmpty, store } from "./src/store.js";
@@ -27,6 +28,9 @@ import transferRoutes from "./src/routes/transfers.js";
 import lawRoutes from "./src/routes/laws.js";
 import arbitrationRoutes from "./src/routes/arbitration.js";
 import fileRoutes from "./src/routes/files.js";
+import ssiRoutes from "./src/routes/ssi.js";
+import { attachRealtimeHub } from "./src/services/realtimeHub.js";
+import landsRoutes from "./src/routes/lands.js";
 
 async function bootstrap() {
   const pool = await connectPostgres();
@@ -124,6 +128,27 @@ async function bootstrap() {
     }
   }
 
+  /** Dev / LAN: Vite/Next on http://192.168.x.x:5173 would otherwise get "failed to fetch" (opaque CORS). */
+  function isAllowedPrivateLanOrigin(origin) {
+    if (process.env.NODE_ENV === "production") return false;
+    if (String(process.env.CORS_ALLOW_LAN || "true").toLowerCase() === "false") return false;
+    try {
+      const u = new URL(String(origin));
+      if (u.protocol !== "http:" && u.protocol !== "https:") return false;
+      const h = u.hostname;
+      const m = /^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/.exec(h);
+      if (!m) return false;
+      const a = Number(m[1]);
+      const b = Number(m[2]);
+      if (a === 10) return true;
+      if (a === 172 && b >= 16 && b <= 31) return true;
+      if (a === 192 && b === 168) return true;
+      return false;
+    } catch {
+      return false;
+    }
+  }
+
   app.use(
     cors({
       origin(origin, cb) {
@@ -131,10 +156,11 @@ async function bootstrap() {
         if (allowedOrigins.has(origin)) return cb(null, true);
         if (isAllowedWebViewOrigin(origin)) return cb(null, true);
         if (isAllowedDevTunnelOrigin(origin)) return cb(null, true);
+        if (isAllowedPrivateLanOrigin(origin)) return cb(null, true);
         const o = String(origin);
         if (/^https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/i.test(o)) return cb(null, true);
         if (/^https?:\/\/\[::1\](:\d+)?$/i.test(o)) return cb(null, true);
-        return cb(new Error("CORS blocked"), false);
+        return cb(null, false);
       },
       credentials: true,
     })
@@ -155,6 +181,9 @@ async function bootstrap() {
   app.use("/api/laws", lawRoutes);
   app.use("/api/arbitration", arbitrationRoutes);
   app.use("/api/files", fileRoutes);
+  app.use("/api/ssi", ssiRoutes);
+  // Legacy lands endpoints (kept for frontend compatibility)
+  app.use("/api/lands", landsRoutes);
 
   app.get("/", (_req, res) => {
     res.send("SmartLand API running");
@@ -181,8 +210,11 @@ async function bootstrap() {
 
   const PORT = Number(process.env.PORT || 3001);
   const HOST = process.env.BIND_HOST || "0.0.0.0";
-  app.listen(PORT, HOST, () => {
+  const server = http.createServer(app);
+  attachRealtimeHub(server);
+  server.listen(PORT, HOST, () => {
     console.log(`SmartLand API listening on http://${HOST}:${PORT} (use LAN IP from phone/emulator)`);
+    console.log(`WebSocket available at ws://${HOST}:${PORT}/ws`);
   });
 
   if (process.env.NODE_ENV !== "production") {

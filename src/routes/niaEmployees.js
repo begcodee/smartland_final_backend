@@ -1,6 +1,6 @@
 import express from "express";
 import { z } from "zod";
-import { authenticate, requireRole } from "../auth.js";
+import { authenticate, requireRole, identityQueueRoles } from "../auth.js";
 import { seedIfEmpty, store } from "../store.js";
 import { isValidGhanaCardFormat, normalizeGhanaCardNumber } from "../utils/ghanaCard.js";
 
@@ -24,19 +24,20 @@ function ensureStaffSeeded() {
   for (const s of staff) store.niaEmployees.set(s.staffId, s);
 }
 
-router.get("/staff", authenticate, requireRole("nia"), (_req, res) => {
+// Ghana Card / identity verification responsibilities are enforced by Lands Commission on backend.
+router.get("/staff", authenticate, requireRole(...identityQueueRoles()), (_req, res) => {
   seedIfEmpty();
   ensureStaffSeeded();
   res.json({ success: true, staff: Array.from(store.niaEmployees.values()) });
 });
 
-router.get("/attempts", authenticate, requireRole("nia"), (_req, res) => {
+router.get("/attempts", authenticate, requireRole(...identityQueueRoles()), (_req, res) => {
   seedIfEmpty();
   ensureStaffSeeded();
   res.json({ success: true, attempts: store.employeeAttempts || [] });
 });
 
-router.post("/verify-employee", authenticate, requireRole("nia"), (req, res) => {
+router.post("/verify-employee", authenticate, requireRole(...identityQueueRoles()), (req, res) => {
   seedIfEmpty();
   ensureStaffSeeded();
 

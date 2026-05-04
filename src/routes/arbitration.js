@@ -10,14 +10,14 @@ const router = express.Router();
 
 function notifyNodes({ title, message, actionUrl = "/admin" }) {
   for (const u of Array.from(store.users.values())) {
-    if (u.role !== "nia" && u.role !== "lands_commission" && u.role !== "admin") continue;
+    if (u.role !== "lands_commission" && u.role !== "admin") continue;
     createNotification({
       userId: u.id,
       type: "red_flag",
       category: "security",
       title,
       message,
-      actionUrl: u.role === "nia" ? "/nia" : actionUrl,
+      actionUrl,
     });
   }
 }

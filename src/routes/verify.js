@@ -14,11 +14,33 @@ import { createNotification } from "./notifications.js";
 
 const router = express.Router();
 
+function demoForceIdentityVerified(req, res) {
+  seedIfEmpty();
+  const target = store.users.get(String(req.params.id));
+  if (!target) return res.status(404).json({ error: "User not found" });
+
+  target.niaStatus = "verified";
+  target.niaReferenceId = `NIA_DEMO_${Math.random().toString(16).slice(2)}${Date.now().toString(16)}`;
+  target.niaVerifiedAt = new Date().toISOString();
+
+  createNotification({
+    userId: target.id,
+    type: "info",
+    category: "verification",
+    title: "Identity verification updated (demo)",
+    message: "Your identity prescreen was set to VERIFIED for demo testing. Lands Commission can now approve your account.",
+    actionUrl: "/admin",
+  });
+
+  audit(req, "demo.force_identity_verified", { targetUserId: target.id });
+  res.json({ success: true, user: publicUser(target, req.user) });
+}
+
 /**
  * Ghana Card IVS simulation — Protocol A (format + mock ledger) + Protocol B (biometric binding).
  * Thesis framing returned in payload for documentation / UI.
  */
-router.post("/ghana-card", (req, res) => {
+router.post("/ghana-card", authenticate, requireRole("buyer", "seller", "lands_commission", "admin"), (req, res) => {
   const parsed = z
     .object({
       cardNumber: z.string().min(1),
@@ -91,32 +113,24 @@ router.get("/dashboard-rules", (_req, res) => {
 });
 
 /**
- * Demo helper: allow an admin to simulate NIA verification for a user.
- * This is DEV-only to keep the strict workflow intact for real deployments.
+ * Demo helper: simulate identity-queue verification for a user (niaStatus fields). DEV-only.
  */
-router.post("/demo/force-nia/:id", authenticate, requireRole("admin"), (req, res) => {
-  seedIfEmpty();
+router.post("/demo/force-identity-verified/:id", authenticate, requireRole("admin"), (req, res) => {
   const devOnly = process.env.NODE_ENV !== "production";
   if (!devOnly) return res.status(403).json({ error: "Not available in production" });
+  return demoForceIdentityVerified(req, res);
+});
 
-  const target = store.users.get(String(req.params.id));
-  if (!target) return res.status(404).json({ error: "User not found" });
-
-  target.niaStatus = "verified";
-  target.niaReferenceId = `NIA_DEMO_${Math.random().toString(16).slice(2)}${Date.now().toString(16)}`;
-  target.niaVerifiedAt = new Date().toISOString();
-
-  createNotification({
-    userId: target.id,
-    type: "info",
-    category: "verification",
-    title: "NIA status updated (demo)",
-    message: "Your NIA verification was set to VERIFIED for demo testing. Lands Commission can now approve your account.",
-    actionUrl: "/admin",
-  });
-
-  audit(req, "demo.force_nia_verified", { targetUserId: target.id });
-  res.json({ success: true, user: publicUser(target, req.user) });
+/** @deprecated Use POST /demo/force-identity-verified/:id */
+router.post("/demo/force-nia/:id", authenticate, requireRole("admin"), (req, res) => {
+  const devOnly = process.env.NODE_ENV !== "production";
+  if (!devOnly) {
+    return res.status(410).json({
+      error: "Deprecated",
+      use: "POST /api/verify/demo/force-identity-verified/:id",
+    });
+  }
+  return demoForceIdentityVerified(req, res);
 });
 
 export default router;
