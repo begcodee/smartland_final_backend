@@ -90,16 +90,13 @@ router.post("/register", async (req, res) => {
     creditScore: { score: 0, rating: "Unscored", paymentHistory: 0, creditUtilization: 0, lengthOfHistory: 0, newCredit: 0, creditMix: 0 },
   };
 
-  // 1. Persist to DB first — this is the source of truth
-  try {
-    await upsertUserToDb(user);
-  } catch (e) {
-    console.error("[register] DB write failed:", e.message);
-    return res.status(500).json({ error: "Registration failed. Please try again." });
-  }
-
-  // 2. Add to in-memory store
+  // 1. Add to in-memory store immediately (user can login right away)
   store.users.set(user.id, user);
+
+  // 2. Persist to DB — if it fails we log and retry via the periodic scheduler
+  upsertUserToDb(user).catch((e) =>
+    console.error("[register] DB write failed (will retry on next flush):", e.message)
+  );
 
   const token = signToken(user);
   res.status(201).json({
