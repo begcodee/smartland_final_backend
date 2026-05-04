@@ -13,6 +13,14 @@ import {
   sendFraudAlerts,
 } from "../services/fraudDetection.js";
 import {
+  computeParcelContentHash,
+  findDuplicateByContentHash,
+  anchorParcelOnChain,
+  isChainAnchored,
+  assertNotAnchored,
+  IMMUTABLE_FIELDS,
+} from "../services/immutability.js";
+import {
   polygonBbox,
   bboxArea,
   bboxIntersectionArea,
@@ -191,6 +199,9 @@ router.post("/", authenticate, requireRole("seller", "lands_commission", "admin"
   if (!title || (!locationStr && !location) || !Number.isFinite(priceVal)) {
     return res.status(400).json({ error: "Missing title, location, or price (priceGhs)" });
   }
+
+  // ── Immutability: reject if seller already has an on-chain anchored parcel ──
+  // (Content-hash duplicate check runs after docs are known — see below)
 
   // ── Mandatory Document Bundle Validation ──────────────────────────────────
   // All 4 document types are REQUIRED. Submission is auto-rejected if any is missing.
@@ -430,6 +441,32 @@ router.post("/", authenticate, requireRole("seller", "lands_commission", "admin"
   const ocrBlob = String(sitePlanOcrText || landDocumentOcrText || "").trim();
   attachProtocolCToParcel(parcel, ocrBlob);
 
+  // ── Content hash: compute and check for duplicate submissions ───────────
+  const contentHash = computeParcelContentHash(parcel);
+  parcel.contentHash = contentHash;
+
+  const dupParcel = findDuplicateByContentHash(contentHash, store);
+  if (dupParcel) {
+    audit(req, "parcel.create.rejected", {
+      reason: "duplicate_content_hash",
+      duplicateParcelId: dupParcel.id,
+      contentHash,
+    });
+    return res.status(409).json({
+      success: false,
+      error: "DUPLICATE_PARCEL_SUBMISSION",
+      message:
+        "This parcel submission is identical to an existing record. " +
+        "Each parcel can only be registered once. " +
+        (isChainAnchored(dupParcel)
+          ? "The original is already anchored on the blockchain and is immutable."
+          : `An identical submission already exists (id: ${dupParcel.id}, status: ${dupParcel.status}).`),
+      existingParcelId: dupParcel.id,
+      existingStatus: dupParcel.status,
+      chainAnchored: isChainAnchored(dupParcel),
+    });
+  }
+
   // ── Fraud Detection ──────────────────────────────────────────────────────
   // Run all 5 fraud rules before persisting
   const fraudResult = runFraudChecks(parcel, store);
@@ -599,43 +636,83 @@ router.patch(
       return res.json({ success: true, parcel: safeParcel(parcel, req.user) });
     }
 
-    // approve
-    parcel.registryClearance = "clear";
-    parcel.status = "available";
-    audit(req, "parcel.registry.approved", { parcelId: parcel.id, note });
-
-    // Ethereum registry integration (v2): register parcel on-chain after Lands Commission approval.
-    // Requires seller wallet address on file + CHAIN_* env.
-    try {
-      const seller = store.users.get(parcel.sellerId) || null;
-      const ownerAddr = seller?.walletAddress || seller?.evmAddress || null;
-      const r = await maybeRegisterParcelOnChain({
-        parcel,
-        ownerAddress: ownerAddr,
-        metadataHash: null,
+    // ── IMMUTABILITY: block approval if already anchored ─────────────────
+    if (isChainAnchored(parcel)) {
+      return res.status(403).json({
+        success: false,
+        error: "PARCEL_IMMUTABLE",
+        message: "Parcel is already anchored on-chain. Its data is immutable.",
+        chainAnchor: parcel.chainAnchor || parcel.chainRegistry,
       });
-      parcel.chainRegistry = {
-        ...(parcel.chainRegistry || {}),
-        lastAttemptAt: new Date().toISOString(),
-        skipped: Boolean(r?.skipped),
-        reason: r?.reason || null,
-        txHash: r?.txHash || null,
-        parcelIdBytes32: r?.parcelIdBytes32 || null,
-        metadataHash: r?.metadataHash || null,
-      };
-      audit(req, "chain.registry.register_parcel", { parcelId: parcel.id, result: parcel.chainRegistry });
-    } catch (e) {
-      parcel.chainRegistry = {
-        ...(parcel.chainRegistry || {}),
-        lastAttemptAt: new Date().toISOString(),
-        skipped: true,
-        reason: "error",
-        error: String(e?.message || e),
-      };
-      audit(req, "chain.registry.register_parcel_failed", { parcelId: parcel.id, error: parcel.chainRegistry.error });
     }
 
-    return res.json({ success: true, parcel: safeParcel(parcel, req.user) });
+    // approve → make available
+    parcel.registryClearance = "clear";
+    parcel.status = "available";
+    parcel.approvedAt = new Date().toISOString();
+    parcel.approvedBy = req.user.id;
+    audit(req, "parcel.registry.approved", { parcelId: parcel.id, note });
+
+    // ── BLOCKCHAIN ANCHOR: register on Polygon Amoy ───────────────────────
+    // Once this succeeds the parcel data is IMMUTABLE on-chain.
+    const seller = store.users.get(parcel.sellerId) || null;
+    const ownerAddr = seller?.walletAddress || seller?.evmAddress || seller?.walletAddr || null;
+
+    let chainResult;
+    try {
+      chainResult = await anchorParcelOnChain({ parcel, ownerWalletAddress: ownerAddr });
+      parcel.chainAnchor = {
+        txHash: chainResult?.txHash || null,
+        contentHash: chainResult?.contentHash || parcel.contentHash,
+        metadataHashBytes32: chainResult?.metadataHashBytes32 || null,
+        anchoredAt: chainResult?.anchoredAt || new Date().toISOString(),
+        skipped: Boolean(chainResult?.skipped),
+        skipReason: chainResult?.reason || null,
+        network: process.env.CHAIN_NETWORK_NAME || "polygon-amoy",
+      };
+      // Once anchored: freeze content hash so no re-submission is possible
+      if (!chainResult?.skipped) {
+        parcel.immutable = true;
+      }
+      audit(req, "chain.parcel.anchored", {
+        parcelId: parcel.id,
+        txHash: parcel.chainAnchor.txHash,
+        contentHash: parcel.chainAnchor.contentHash,
+        skipped: parcel.chainAnchor.skipped,
+      });
+    } catch (e) {
+      parcel.chainAnchor = {
+        txHash: null,
+        contentHash: parcel.contentHash || null,
+        skipped: true,
+        skipReason: "error",
+        error: String(e?.message || e),
+        anchoredAt: new Date().toISOString(),
+      };
+      audit(req, "chain.parcel.anchor_failed", { parcelId: parcel.id, error: parcel.chainAnchor.error });
+    }
+
+    // Notify seller of approval + chain status
+    if (seller) {
+      createNotification({
+        userId: seller.id,
+        type: "success",
+        category: "parcel_review",
+        title: `✅ Parcel approved: "${parcel.title}"`,
+        message: parcel.chainAnchor?.txHash
+          ? `Your parcel has been approved by Lands Commission and anchored on the blockchain (tx: ${parcel.chainAnchor.txHash}). It is now visible to buyers. Data is immutable.`
+          : `Your parcel has been approved by Lands Commission and is now visible to buyers. Blockchain anchoring is pending chain configuration.`,
+        actionUrl: "/",
+      });
+    }
+
+    return res.json({
+      success: true,
+      message: "Parcel approved. Now visible to buyers.",
+      immutable: Boolean(parcel.immutable),
+      chainAnchor: parcel.chainAnchor,
+      parcel: safeParcel(parcel, req.user),
+    });
   }
 );
 
@@ -654,6 +731,61 @@ router.patch(
     res.json(safeParcel(parcel));
   }
 );
+
+// ─── PATCH /:id — General parcel edit (BLOCKED for chain-anchored parcels) ─
+router.patch("/:id", authenticate, requireRole("seller", "lands_commission", "admin"), (req, res) => {
+  seedIfEmpty();
+  const parcel = store.parcels.get(String(req.params.id));
+  if (!parcel) return res.status(404).json({ error: "Parcel not found" });
+
+  // IMMUTABILITY GUARD — on-chain parcels cannot be modified
+  if (isChainAnchored(parcel)) {
+    return res.status(403).json({
+      success: false,
+      error: "PARCEL_IMMUTABLE",
+      message:
+        "This parcel is anchored on the blockchain. Its data is tamper-proof and cannot be modified. " +
+        `Immutable fields: ${IMMUTABLE_FIELDS.join(", ")}.`,
+      chainAnchor: parcel.chainAnchor || parcel.chainRegistry || null,
+      immutableFields: IMMUTABLE_FIELDS,
+    });
+  }
+
+  // Only seller (owner) or LC/admin can edit a pending parcel
+  if (req.user.role === "seller" && parcel.sellerId !== req.user.id) {
+    return res.status(403).json({ error: "You do not own this parcel." });
+  }
+
+  // Prevent edits to submitted-but-approved parcels by seller
+  if (req.user.role === "seller" && parcel.status !== "pending_glc_review") {
+    return res.status(403).json({ error: "You can only edit parcels that are pending review." });
+  }
+
+  // Apply only allowed (non-immutable) fields from body
+  const allowed = ["images", "notes", "contactInfo"];
+  for (const field of allowed) {
+    if (req.body[field] !== undefined) parcel[field] = req.body[field];
+  }
+
+  audit(req, "parcel.updated", { parcelId: parcel.id, fields: allowed.filter((f) => req.body[f] !== undefined) });
+  res.json({ success: true, parcel: safeParcel(parcel, req.user) });
+});
+
+// ─── GET /api/parcels/:id/chain-status ───────────────────────────────────
+// Returns the blockchain anchor status for a parcel
+router.get("/:id/chain-status", (req, res) => {
+  seedIfEmpty();
+  const parcel = store.parcels.get(String(req.params.id));
+  if (!parcel) return res.status(404).json({ error: "Parcel not found" });
+  res.json({
+    parcelId: parcel.id,
+    immutable: Boolean(parcel.immutable),
+    chainAnchored: isChainAnchored(parcel),
+    chainAnchor: parcel.chainAnchor || parcel.chainRegistry || null,
+    contentHash: parcel.contentHash || null,
+    status: parcel.status,
+  });
+});
 
 export default router;
 

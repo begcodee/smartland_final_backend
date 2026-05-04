@@ -7,6 +7,7 @@ import { LandConflictEngine } from "../services/landConflictEngine.js";
 import { audit } from "../services/audit.js";
 import { createNotification } from "./notifications.js";
 import { runFraudChecks, applyFraudFindingsToParcel, sendFraudAlerts } from "../services/fraudDetection.js";
+import { executeTransferOnChain, isChainAnchored } from "../services/immutability.js";
 
 const router = express.Router();
 
@@ -412,9 +413,43 @@ router.get("/verify", authenticate, async (req, res) => {
         parcel.transfers = [...(parcel.transfers || []), transfer];
         transferCreatedOrFound = transfer;
 
-        // Notify buyer + seller + Lands Commission/admins that escrow is pending approval.
+        // ── Smart contract: record transfer on-chain ──────────────────────
+        // The smart contract is the authoritative record of ownership change.
+        // We attempt this now; if the chain env isn't configured it skips gracefully.
         const buyer = store.users.get(existing.buyerId) || null;
         const seller = store.users.get(parcel.sellerId) || null;
+        const fromAddr = seller?.walletAddress || seller?.evmAddress || null;
+        const toAddr = buyer?.walletAddress || buyer?.evmAddress || null;
+
+        if (isChainAnchored(parcel)) {
+          executeTransferOnChain({
+            parcel,
+            transfer,
+            fromAddress: fromAddr,
+            toAddress: toAddr,
+          })
+            .then((r) => {
+              transfer.chainTxHash = r?.txHash || null;
+              transfer.chainNetwork = process.env.CHAIN_NETWORK_NAME || "polygon-amoy";
+              transfer.chainAnchoredAt = r?.executedAt || new Date().toISOString();
+              transfer.chainSkipped = Boolean(r?.skipped);
+              transfer.chainSkipReason = r?.reason || null;
+              // Update parcel's last transfer record too
+              const last = parcel.transfers[parcel.transfers.length - 1];
+              if (last?.id === transfer.id) {
+                last.chainTxHash = transfer.chainTxHash;
+                last.chainAnchoredAt = transfer.chainAnchoredAt;
+              }
+              if (!r?.skipped) {
+                parcel.blockchainHash = r?.txHash;
+              }
+            })
+            .catch((e) => {
+              console.error("[chain] executeTransferOnChain failed:", e?.message || e);
+            });
+        }
+
+        // Notify buyer + seller + Lands Commission/admins that escrow is pending approval.
         if (buyer) {
           createNotification({
             userId: buyer.id,
