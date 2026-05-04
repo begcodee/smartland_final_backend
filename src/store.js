@@ -18,6 +18,45 @@ function shouldSeedDemoData() {
   return !prodLike;
 }
 
+/**
+ * One admin/LC user when the DB has no rows yet (Render first boot).
+ * Set BOOTSTRAP_ADMIN_EMAIL + BOOTSTRAP_ADMIN_PASSWORD, deploy once, then remove the password from env.
+ */
+function bootstrapProdAdminFromEnv() {
+  const email = String(process.env.BOOTSTRAP_ADMIN_EMAIL || "").trim().toLowerCase();
+  const password = process.env.BOOTSTRAP_ADMIN_PASSWORD;
+  if (!email || !password) return;
+  if (store.users.size > 0) return;
+  const name =
+    String(process.env.BOOTSTRAP_ADMIN_NAME || "Ghana Lands Commission Admin").trim() ||
+    "Ghana Lands Commission Admin";
+  const roleRaw = String(process.env.BOOTSTRAP_ADMIN_ROLE || "admin").trim().toLowerCase();
+  const role = roleRaw === "lands_commission" ? "lands_commission" : "admin";
+  const passwordHash = bcrypt.hashSync(String(password), 10);
+  const uid = id("user");
+  store.users.set(uid, {
+    id: uid,
+    name,
+    email,
+    phoneNumber: process.env.BOOTSTRAP_ADMIN_PHONE?.trim() || null,
+    role,
+    staffId: process.env.BOOTSTRAP_ADMIN_STAFF_ID?.trim() || "GLC-BOOTSTRAP-001",
+    organization: process.env.BOOTSTRAP_ADMIN_ORG?.trim() || "Ghana Lands Commission",
+    passwordHash,
+    createdAt: nowIso(),
+    verified: true,
+    niaStatus: "verified",
+    niaReferenceId: null,
+    niaVerifiedAt: nowIso(),
+    idVerification: null,
+    reputation: { score: 0, totalTransactions: 0, successfulTransactions: 0, disputesWon: 0, communityVotes: 0 },
+    creditScore: { score: 0, rating: "Unscored", paymentHistory: 0, creditUtilization: 0, lengthOfHistory: 0, newCredit: 0, creditMix: 0 },
+  });
+  console.warn(
+    `[store] Bootstrap ${role} user for ${email}. Remove BOOTSTRAP_ADMIN_PASSWORD from env after first deploy; change password in-app.`
+  );
+}
+
 export const store = {
   users: new Map(),
   parcels: new Map(),
@@ -434,6 +473,10 @@ export function seedIfEmpty() {
     ghanaCardNumber: "GHA-615204987-3",
     active: false,
   });
+  }
+
+  if (store.users.size === 0) {
+    bootstrapProdAdminFromEnv();
   }
 
   if (!store.laws.length) {

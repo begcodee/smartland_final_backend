@@ -89,7 +89,25 @@ router.post("/login", async (req, res) => {
   const user = Array.from(store.users.values()).find(
     (u) => u.email.toLowerCase() === normalizedEmail
   );
-  if (!user) return res.status(401).json({ error: "Invalid credentials" });
+  if (!user) {
+    const prodLike =
+      process.env.NODE_ENV === "production" || String(process.env.RENDER || "").toLowerCase() === "true";
+    if (prodLike && store.users.size === 0) {
+      return res.status(401).json({
+        error: "Invalid credentials",
+        message:
+          "No accounts exist on this server yet. Register with POST /api/auth/register, or set BOOTSTRAP_ADMIN_EMAIL and BOOTSTRAP_ADMIN_PASSWORD on Render and redeploy once.",
+      });
+    }
+    return res.status(401).json({ error: "Invalid credentials" });
+  }
+
+  if (!user.passwordHash) {
+    return res.status(401).json({
+      error: "Invalid credentials",
+      message: "This account has no password hash (legacy row). Reset by re-registering or updating the user in the database.",
+    });
+  }
 
   const ok = await bcrypt.compare(String(password), user.passwordHash);
   if (!ok) return res.status(401).json({ error: "Invalid credentials" });

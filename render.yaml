@@ -6,6 +6,9 @@
 # Root GET returns "SmartLand API running"; use GET /health for deploy checks.
 # On Render, set CORS_ORIGINS (and FRONTEND_URL for payments) to your *frontend*
 # origin(s), e.g. https://your-app.vercel.app — not the backend URL above.
+#
+# First login: users come from Postgres (sl_users). If empty, either POST /api/auth/register
+# or set BOOTSTRAP_ADMIN_EMAIL + BOOTSTRAP_ADMIN_PASSWORD (one deploy), or SEED_DEMO_USERS=true for demo seeds.
 services:
   - type: web
     name: smartland-backend
