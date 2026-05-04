@@ -24,6 +24,22 @@ const loginSchema = z.object({
   password: z.string().min(1).max(200),
 });
 
+/** Map common frontend field names so login does not fail on shape alone. */
+function normalizeLoginBody(body) {
+  if (!body || typeof body !== "object") return body;
+  const b = { ...body };
+  const emailish =
+    b.email ??
+    b.userEmail ??
+    b.user_email ??
+    (typeof b.username === "string" && String(b.username).includes("@") ? b.username : undefined);
+  if (emailish != null && b.email == null) b.email = emailish;
+  const pass =
+    b.password ?? b.pass ?? b.pwd ?? b.userPassword ?? b.user_password;
+  if (pass != null && b.password == null) b.password = pass;
+  return b;
+}
+
 router.post("/register", async (req, res) => {
   seedIfEmpty();
 
@@ -79,9 +95,13 @@ router.post("/register", async (req, res) => {
 router.post("/login", async (req, res) => {
   seedIfEmpty();
 
-  const parsed = loginSchema.safeParse(req.body);
+  const parsed = loginSchema.safeParse(normalizeLoginBody(req.body));
   if (!parsed.success) {
-    return res.status(400).json({ error: "Invalid payload", details: parsed.error.flatten() });
+    return res.status(400).json({
+      error: "Invalid payload",
+      hint: "Send JSON with email (or userEmail / username if it is an email) and password.",
+      details: parsed.error.flatten(),
+    });
   }
   const { email, password } = parsed.data;
 
@@ -99,7 +119,10 @@ router.post("/login", async (req, res) => {
           "No accounts exist on this server yet. Register with POST /api/auth/register, or set BOOTSTRAP_ADMIN_EMAIL and BOOTSTRAP_ADMIN_PASSWORD on Render and redeploy once.",
       });
     }
-    return res.status(401).json({ error: "Invalid credentials" });
+    return res.status(401).json({
+      error: "Invalid credentials",
+      hint: "No user with this email. On production, create an account first (POST /api/auth/register) or use a row that exists in the database.",
+    });
   }
 
   if (!user.passwordHash) {
@@ -110,7 +133,12 @@ router.post("/login", async (req, res) => {
   }
 
   const ok = await bcrypt.compare(String(password), user.passwordHash);
-  if (!ok) return res.status(401).json({ error: "Invalid credentials" });
+  if (!ok) {
+    return res.status(401).json({
+      error: "Invalid credentials",
+      hint: "Password does not match this account. If the account was created outside this API, the hash format may differ—reset password by registering a new user or updating password_hash in sl_users.",
+    });
+  }
 
   if (user.role === "nia") {
     return res.status(403).json({
