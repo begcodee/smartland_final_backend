@@ -7,8 +7,10 @@
 # On Render, set CORS_ORIGINS (and FRONTEND_URL for payments) to your *frontend*
 # origin(s), e.g. https://your-app.vercel.app — not the backend URL above.
 #
-# First login: users come from Postgres (sl_users). If empty, either POST /api/auth/register
-# or set BOOTSTRAP_ADMIN_EMAIL + BOOTSTRAP_ADMIN_PASSWORD (one deploy), or SEED_DEMO_USERS=true for demo seeds.
+# First login: users come from Postgres (sl_users). If empty, either POST /api/auth/register,
+# set BOOTSTRAP_ADMIN_EMAIL + BOOTSTRAP_ADMIN_PASSWORD (one deploy), or run locally:
+#   DEFAULT_ADMIN_EMAIL=... DEFAULT_ADMIN_PASSWORD=... npm run db:ensure-admin
+# (uses DATABASE_URL; fixes bad rows where profile JSON overwrote password_hash).
 services:
   - type: web
     name: smartland-backend

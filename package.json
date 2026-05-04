@@ -10,6 +10,7 @@
     "setup": "node setup-database.js",
     "docker:db": "docker compose up -d",
     "simulate": "node scripts/simulate.js",
+    "db:ensure-admin": "node scripts/ensure-admin-user.js",
     "test:lands-chain": "node scripts/test-lands-chain.mjs register",
     "chain:compile": "hardhat compile --config hardhat.config.mjs",
     "chain:deploy:local": "hardhat run scripts/deploy-registry.js --network hardhat --config hardhat.config.mjs",

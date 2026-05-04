@@ -32,8 +32,29 @@ function userToProfile(user) {
 }
 
 function rowToUser(row) {
-  const p = row.profile && typeof row.profile === "object" ? row.profile : {};
-  return { id: row.id, email: row.email, passwordHash: row.password_hash, ...p };
+  const raw = row.profile;
+  const p =
+    raw && typeof raw === "object" && raw !== null && !Array.isArray(raw) ? { ...raw } : {};
+  const columnHash =
+    row.password_hash != null && String(row.password_hash).trim() !== "" ? String(row.password_hash) : null;
+  const legacyProfileHash =
+    typeof p.passwordHash === "string" && String(p.passwordHash).trim() !== ""
+      ? String(p.passwordHash).trim()
+      : typeof p.password_hash === "string" && String(p.password_hash).trim() !== ""
+        ? String(p.password_hash).trim()
+        : null;
+  const passwordHash = columnHash || legacyProfileHash || null;
+  delete p.passwordHash;
+  delete p.password_hash;
+  delete p.password;
+  delete p.id;
+  if (p.email != null) delete p.email;
+  return {
+    ...p,
+    id: row.id,
+    email: String(row.email || "").trim().toLowerCase(),
+    passwordHash,
+  };
 }
 
 export async function loadStoreFromPostgres(pool, store) {
