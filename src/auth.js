@@ -15,15 +15,6 @@ const JWT_ISSUER = (process.env.JWT_ISSUER || "smartland-backend").trim();
 const JWT_AUDIENCE = (process.env.JWT_AUDIENCE || "smartland").trim();
 const DEV_FALLBACK_SECRET = "dev-secret-change-me";
 
-/** When `true`, users with role `nia` may log in and call identity-queue routes under `/api/nia/*`. Default: off (LC/admin only). */
-export function isNiaStaffAllowed() {
-  return String(process.env.ALLOW_NIA_STAFF_LOGIN || "").toLowerCase() === "true";
-}
-
-export function identityQueueRoles() {
-  return isNiaStaffAllowed() ? ["lands_commission", "admin", "nia"] : ["lands_commission", "admin"];
-}
-
 export function signToken(user) {
   return jwt.sign(
     { sub: user.id, role: user.role, email: user.email },
@@ -52,9 +43,10 @@ export function authenticate(req, res, next) {
     });
     const user = store.users.get(payload.sub);
     if (!user) return res.status(401).json({ error: "Invalid token user" });
-    if (user.role === "nia" && !isNiaStaffAllowed()) {
+    if (user.role === "nia") {
       return res.status(403).json({
-        error: "The NIA staff persona is disabled. Sign in with a Lands Commission or admin account, or set ALLOW_NIA_STAFF_LOGIN=true on the server if you must keep NIA-officer tokens.",
+        error:
+          "The NIA role is not used. Sign in with a Ghana Lands Commission (lands_commission) or admin account to verify Ghana Card prescreening and land documents.",
       });
     }
     // Self view: keep full identity for accountability

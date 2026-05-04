@@ -415,7 +415,7 @@ export function seedIfEmpty() {
   store.parcels.set(parcelUncompletedBuilding.id, parcelUncompletedBuilding);
   store.parcels.set(parcelOnePlotWithBuilding.id, parcelOnePlotWithBuilding);
 
-  // Seed demo NIA staff list
+  // Seed demo Lands Commission identity staff registry (in-memory demo)
   store.niaEmployees.set("NIA-001", {
     staffId: "NIA-001",
     fullName: "Ama Mensah",
@@ -444,7 +444,7 @@ export function seedIfEmpty() {
         code: "REG-GLC-001",
         title: "Parcel registration — documentary evidence",
         summary: "Minimum documents required before a parcel may be listed on SmartLand.",
-        body: "Sellers must provide a valid site plan or survey, evidence of identity matching NIA records, and declaration of encumbrances. The Lands Commission may request further evidence where overlap or chain gaps are flagged.",
+        body: "Sellers must provide a valid site plan or survey, evidence of identity consistent with Ghana Card verification by the Lands Commission, and declaration of encumbrances. The Lands Commission may request further evidence where overlap or chain gaps are flagged.",
         category: "registration",
         effectiveFrom: "2024-01-01",
         status: "active",

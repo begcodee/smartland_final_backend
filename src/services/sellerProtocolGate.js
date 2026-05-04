@@ -2,7 +2,7 @@ import { runProtocolC } from "./smartlandVerificationProtocols.js";
 
 /**
  * Rule-based gate: seller must satisfy SmartLand verification protocols before automated settlement.
- * NIA verification alone does not clear a failed biometric binding (Protocol B).
+ * Lands Commission Ghana Card prescreen alone does not clear a failed biometric binding (Protocol B).
  */
 
 export function getSmartlandProtocols(user) {
@@ -26,7 +26,7 @@ export function sellerProtocolsAllowTransaction(user) {
 
   const pb = sp?.protocolB;
   if (pb && pb.skipped === true) {
-    /* Manual NIA path — still requires NIA verified */
+    /* Manual LC review path — still requires identity prescreen (niaStatus) verified */
     if (user.niaStatus !== "verified") reasons.push("PROTOCOL_B_PENDING_MANUAL_NIA");
   } else if (pb && pb.passed === false) {
     reasons.push("PROTOCOL_B_BIOMETRIC_FAILED");

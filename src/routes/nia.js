@@ -1,5 +1,5 @@
 import express from "express";
-import { authenticate, requireRole, identityQueueRoles } from "../auth.js";
+import { authenticate, requireRole } from "../auth.js";
 import { seedIfEmpty, store, publicUser } from "../store.js";
 import { z } from "zod";
 import { audit } from "../services/audit.js";
@@ -7,9 +7,9 @@ import { createNotification } from "./notifications.js";
 
 const router = express.Router();
 
-// Ghana Card/NIA responsibilities are enforced by Lands Commission in this deployment.
-// NIA role is disabled for production workflow; LC/Admin are authoritative.
-router.get("/users", authenticate, requireRole(...identityQueueRoles()), (_req, res) => {
+// Ghana Lands Commission verifies Ghana Card prescreening (niaStatus) for buyers and sellers.
+// Routes stay under /api/nia for compatibility; mirror: /api/lands-commission (see index.js).
+router.get("/users", authenticate, requireRole("lands_commission", "admin"), (_req, res) => {
   seedIfEmpty();
   const pending = Array.from(store.users.values())
     .filter((u) => u.role !== "admin" && u.role !== "lands_commission" && u.niaStatus === "pending")
@@ -17,7 +17,7 @@ router.get("/users", authenticate, requireRole(...identityQueueRoles()), (_req, 
   res.json({ success: true, users: pending });
 });
 
-router.post("/users/:id/decision", authenticate, requireRole(...identityQueueRoles()), (req, res) => {
+router.post("/users/:id/decision", authenticate, requireRole("lands_commission", "admin"), (req, res) => {
   seedIfEmpty();
   const target = store.users.get(req.params.id);
   if (!target) return res.status(404).json({ error: "User not found" });
@@ -74,7 +74,7 @@ router.post("/users/:id/decision", authenticate, requireRole(...identityQueueRol
     actionUrl: decision === "verified" ? "/admin" : "/",
   });
 
-  audit(req, "nia.user.decision", { targetUserId: target.id, decision });
+  audit(req, "lands.identity.queue_decision", { targetUserId: target.id, decision });
   res.json({ success: true, user: publicUser(target, req.user) });
 });
 

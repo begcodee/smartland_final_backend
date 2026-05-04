@@ -8,7 +8,7 @@ export function computeRiskScore(input) {
   const idwise = input?.idwise || {};
   const user = input?.user || {};
 
-  // Identity verified (IDWise or NIA decision)
+  // Identity verified (Ghana Card prescreen / Lands Commission decision)
   if (idwise.status === "approved") score += 40;
   else if (idwise.status === "pending") reasons.push("IDWise pending");
   else reasons.push("IDWise not approved");

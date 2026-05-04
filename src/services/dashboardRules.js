@@ -6,7 +6,8 @@
 export const DASHBOARD_RULES = {
   seller: {
     role: "seller",
-    narrative: "Landowner — lists parcels; must pass Protocols A→B (identity) via mock IVS; parcel listings run Protocol C when OCR text is supplied.",
+    narrative:
+      "Seller / landowner — lists parcels; must pass Protocols A→B (Ghana Card) via mock IVS under Lands Commission rules; parcel listings run Protocol C (land documents) when OCR text is supplied.",
     allowed: [
       "POST /api/parcels (when submissionAllowed + Protocol A satisfied; Protocol C may flag parcel)",
       "POST /api/conversations",
@@ -23,7 +24,8 @@ export const DASHBOARD_RULES = {
 
   buyer: {
     role: "buyer",
-    narrative: "Purchaser — checkout & transfers; gated by parcel/seller red-flag engine + seller protocol completeness.",
+    narrative:
+      "Purchaser / investor — checkout and transfers; gated by parcel and seller red-flag engine, Lands Commission verification, and seller protocol completeness.",
     allowed: [
       "POST /api/payments/initialize",
       "GET /api/payments/verify",
@@ -39,25 +41,27 @@ export const DASHBOARD_RULES = {
   lands_commission: {
     role: "lands_commission",
     narrative:
-      "Ghana Lands Commission — operates the simulated Ghana Card IVS queue and land readiness checks; cannot endorse applicants until identity prescreen (niaStatus) is verified.",
+      "Ghana Lands Commission (main registrar admin) — verifies Ghana Card / identity prescreening and land documents for sellers, landowners, buyers, and investors; endorses accounts and registry readiness when checks pass.",
     allowed: [
-      "PATCH /api/users/:id/verify",
+      "PATCH /api/users/:id/verify (account + document gate after identity prescreen)",
       "GET /api/users/pending",
-      "GET /api/nia/users (legacy path; identity queue)",
-      "POST /api/nia/users/:id/decision",
-      "GET /api/nia/employees/*",
+      "GET /api/lands-commission/users or GET /api/nia/users (same handler; identity prescreen queue)",
+      "POST /api/lands-commission/users/:id/decision or POST /api/nia/users/:id/decision",
+      "GET /api/lands-commission/employees/* or GET /api/nia/employees/*",
       "GET /api/users (read-only roster)",
+      "Parcel / transfer review aligned with statutory land rules",
     ],
-    blockingRules: ["Users with niaStatus !== verified cannot be approved"],
+    blockingRules: ["Users with niaStatus !== verified cannot receive LC account approval (field name retained for API compatibility)"],
     obligations: [
-      "Reject suspicious identities after Protocol A/B prescreening",
-      "Approve listings only after statutory checks",
+      "Verify Ghana Card IVS prescreening and resolve suspicious identity signals",
+      "Verify land instruments / listing documents before clearing sellers and investors for transaction",
     ],
   },
 
   admin: {
     role: "admin",
-    narrative: "Supervisory Lands Commission / system admin — full oversight of users, parcels, disputes and settlements.",
+    narrative:
+      "Supervisory Ghana Lands Commission / system admin — same verification authority as lands_commission with full operational oversight (users, parcels, disputes, settlements).",
     allowed: ["Inherits lands_commission + POST /api/parcels + red-flag clear"],
   },
 

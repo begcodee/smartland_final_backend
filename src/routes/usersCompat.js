@@ -97,7 +97,7 @@ router.patch("/me", authenticate, async (req, res) => {
     }
 
     me.idVerification = parsed.data.idVerification;
-    // Don't regress NIA status after NIA has already verified the user.
+    // Don't regress identity prescreen status after it has been verified.
     if (me.niaStatus !== "verified") me.niaStatus = "pending";
 
     // Document-size mismatch flagging (declared size vs actual dataUrl size)
@@ -175,7 +175,7 @@ router.patch("/me", authenticate, async (req, res) => {
   res.json({ success: true, user: publicUser(me, req.user) });
 });
 
-// Lands Commission admin approval (blocked until NIA verified)
+// Lands Commission admin approval (blocked until Ghana Card prescreen is verified)
 router.patch("/:id/verify", authenticate, requireRole("lands_commission", "admin"), async (req, res) => {
   seedIfEmpty();
   const target = store.users.get(req.params.id);
@@ -194,7 +194,7 @@ router.patch("/:id/verify", authenticate, requireRole("lands_commission", "admin
   if (target.niaStatus !== "verified") {
     audit(req, "lands.verify_user.blocked", { targetUserId: target.id, niaStatus: target.niaStatus });
     return res.status(400).json({
-      error: "User cannot be approved until NIA verification is successful",
+      error: "User cannot be approved until Lands Commission Ghana Card prescreening is successful",
       niaStatus: target.niaStatus,
     });
   }

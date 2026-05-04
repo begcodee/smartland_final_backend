@@ -96,7 +96,7 @@ export function runProtocolB(faceImage, frontCardImage, { selfieSource }) {
       skipped: true,
       similarity: null,
       threshold: BIOMETRIC_THRESHOLD,
-      reason: "SELFIE_UPLOAD_REQUIRES_MANUAL_NIA_REVIEW",
+      reason: "SELFIE_UPLOAD_REQUIRES_MANUAL_LC_REVIEW",
       thesisNote: THESIS.protocolB,
     };
   }

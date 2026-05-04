@@ -92,15 +92,15 @@ export class LandConflictEngine {
     return false;
   }
 
-  /** Criterion 1 — Seller identity via NIA (SSI): must be NIA-verified. */
-  sellerNiaVerified(userId) {
+  /** Criterion 1 — Seller Ghana Card prescreen (niaStatus): must be LC-verified. */
+  sellerIdentityPrescreenVerified(userId) {
     const u = this.store.users.get(userId);
     if (!u) return false;
     return u.niaStatus === "verified";
   }
 
   async verifyIdentity(userId) {
-    return this.sellerNiaVerified(userId);
+    return this.sellerIdentityPrescreenVerified(userId);
   }
 
   async evaluateTransaction(tx) {
@@ -155,7 +155,7 @@ export class LandConflictEngine {
       riskScore += W.TITLE_CHAIN_GAP;
     }
 
-    // MODULE E — Criterion 3 (ownership) + Criterion 1 (NIA / SSI)
+    // MODULE E — Criterion 3 (ownership) + Criterion 1 (Ghana Card prescreen / SSI)
     const currentOwner = this.currentOwnerId(parcel);
     if (currentOwner !== tx.seller_id) {
       flags.push("SELLER_NOT_REGISTERED_OWNER");
@@ -168,7 +168,7 @@ export class LandConflictEngine {
       riskScore += W.IDENTITY_NOT_VERIFIED;
     }
 
-    // MODULE G — Mock NIA / Lands verification protocols (dashboard rule enforcement)
+    // MODULE G — Lands Commission verification protocols (dashboard rule enforcement)
     const sellerUser = this.store.users.get(tx.seller_id);
     if (sellerUser) {
       const sg = sellerProtocolsAllowTransaction(sellerUser);

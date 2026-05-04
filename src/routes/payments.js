@@ -31,9 +31,11 @@ function redFlagFromEvaluation(evaluation) {
     BIOMETRIC_BINDING_FAILED: "Biometric binding failed (Protocol B). Automated settlement is paused pending arbitrator review.",
     PROTOCOL_A_FAILED: "Ghana Card IVS simulation failed (Protocol A). Automated settlement is paused pending review.",
     LAND_DOCUMENT_UNVERIFIED: "Land document verification failed (Protocol C). Automated settlement is paused pending review.",
-    PROTOCOL_B_PENDING_MANUAL_NIA: "Biometric verification requires manual NIA review. Automated settlement is paused.",
+    PROTOCOL_B_PENDING_MANUAL_NIA:
+      "Biometric verification requires manual Lands Commission review. Automated settlement is paused.",
     PROTOCOL_SNAPSHOT_REQUIRED: "Verification protocol snapshot missing. Automated settlement is paused pending review.",
-    NIA_IDENTITY_NOT_VERIFIED: "Seller identity is not NIA-verified. Automated settlement is paused.",
+    NIA_IDENTITY_NOT_VERIFIED:
+      "Seller identity prescreen is not verified by Lands Commission. Automated settlement is paused.",
     TITLE_CHAIN_GAP: "Title chain inconsistency detected. Automated settlement is paused pending review.",
     GEOMETRIC_OVERLAP_DETECTED: "Geometric overlap risk detected. Automated settlement is paused pending review.",
     ACTIVE_TRANSACTION_EXISTS: "An active transaction/lock exists for this parcel. Automated settlement is paused.",

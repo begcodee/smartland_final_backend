@@ -173,6 +173,8 @@ async function bootstrap() {
   app.use("/api/conversations", conversationRoutes);
   app.use("/api/nia", niaRoutes);
   app.use("/api/nia/employees", niaEmployeeRoutes);
+  app.use("/api/lands-commission", niaRoutes);
+  app.use("/api/lands-commission/employees", niaEmployeeRoutes);
   app.use("/api/verify", verifyRoutes);
   app.use("/api/users", userRoutes);
   app.use("/api/notifications", notificationRoutes);

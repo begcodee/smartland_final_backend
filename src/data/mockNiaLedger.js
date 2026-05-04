@@ -1,5 +1,5 @@
 /**
- * Mock NIA PIN ledger — RESTful simulation of IVS lookup (L.I. 2111 thesis framing).
+ * Mock Ghana Card PIN ledger — IVS-style simulation used by Lands Commission prescreening.
  * PIN must match Ghana Card format and exist in this ledger for Protocol A "handshake".
  */
 export const MOCK_NIA_LEDGER = [

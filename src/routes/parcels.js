@@ -35,7 +35,7 @@ router.post("/", authenticate, requireRole("seller", "lands_commission", "admin"
       audit(req, "parcel.create.blocked", { reason: "nia_not_verified" });
       return res.status(403).json({
         success: false,
-        message: "Parcel submission blocked: NIA identity verification required.",
+        message: "Parcel submission blocked: Ghana Card prescreen must be verified by Lands Commission.",
       });
     }
     if (!actor.submissionAllowed) {

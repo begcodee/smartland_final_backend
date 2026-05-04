@@ -23,7 +23,9 @@ router.post("/vc/issue", authenticate, requireRole("lands_commission", "admin"),
   const u = store.users.get(String(parsed.data.userId));
   if (!u) return res.status(404).json({ error: "User not found" });
   if (!(u.verified && u.niaStatus === "verified")) {
-    return res.status(409).json({ error: "User must be NIA-verified and Lands-verified before VC issuance" });
+    return res.status(409).json({
+      error: "User must pass Lands Commission Ghana Card prescreen and account verification before VC issuance",
+    });
   }
 
   const jwt = await issueRegistryVcJwt({

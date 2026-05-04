@@ -189,7 +189,7 @@ router.post("/:id/messages", authenticate, (req, res) => {
   if (hasAudio && !actorVerified) {
     return res.status(403).json({
       success: false,
-      error: "Voice notes are available only after NIA + Lands Commission verification is complete.",
+      error: "Voice notes are available only after Lands Commission identity and account verification is complete.",
     });
   }
 
