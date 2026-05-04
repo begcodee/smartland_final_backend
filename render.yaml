@@ -1,6 +1,12 @@
 # Blueprint: create a Web Service (Node), not a static site.
 # Link this repo in Render → New Blueprint, or create a Web Service manually:
 # Build: npm ci   Start: npm start   Health check path: /health
+#
+# Production API (example): https://smartland-final-backend.onrender.com
+# Root GET returns "SmartLand API running"; use GET /health for deploy checks.
+# On Render, set CORS_ORIGINS (and FRONTEND_URL for payments) to your *frontend*
+# origin(s), e.g. https://your-app.vercel.app — not the backend URL above.
+# Optional: ALLOW_NIA_STAFF_LOGIN=true if the UI still signs in as role "nia".
 services:
   - type: web
     name: smartland-backend
