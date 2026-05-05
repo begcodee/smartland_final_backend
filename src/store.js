@@ -9,13 +9,11 @@ function id(prefix = "id") {
 }
 
 // Demo in-memory store (no DB required).
-/** Demo users/parcels: on in local dev; off on Render/production unless SEED_DEMO_USERS=true */
+/** Demo users/parcels are opt-in only. Set SEED_DEMO_USERS=true to enable them explicitly. */
 function shouldSeedDemoData() {
   if (process.env.SEED_DEMO_USERS === "true") return true;
   if (process.env.SEED_DEMO_USERS === "false") return false;
-  const prodLike =
-    process.env.NODE_ENV === "production" || String(process.env.RENDER || "") === "true";
-  return !prodLike;
+  return false;
 }
 
 /**
@@ -64,6 +62,7 @@ export const store = {
   messages: new Map(), // conversationId -> array
   payments: new Map(), // reference -> payment record
   transfers: new Map(), // id -> transfer record
+  disputes: new Map(), // id -> dispute record
   ratings: [], // array of { id, fromUserId, toUserId, stars, context, createdAt }
   niaEmployees: new Map(), // staffId -> LC staff / Ghana Card verifier registry (table: sl_nia_employees)
   employeeAttempts: [], // array audit log

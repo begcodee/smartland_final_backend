@@ -37,12 +37,18 @@ function safeTransfer(t, viewerUserId) {
 
   return {
     id: t.id,
+    landParcelId: t.parcelId,
     parcelId: t.parcelId,
     paystackReference: t.paystackReference || null,
     status: t.status || "completed",
+    amount: Number(t.amount || 0),
+    initiatedDate: t.createdAt || null,
+    completedDate: t.completedAt || null,
     createdAt: t.createdAt || null,
     sellerId: t.sellerId,
     buyerId: t.buyerId,
+    fromUser: seller ? { id: seller.id, name: seller.name, email: seller.email } : null,
+    toUser: buyer ? { id: buyer.id, name: buyer.name, email: buyer.email } : null,
     parcel: parcel ? { id: parcel.id, title: parcel.title, location: parcel.location } : null,
     seller: seller ? publicUser(seller, { id: viewerUserId, role: store.users.get(String(viewerUserId))?.role || "public" }) : null,
     buyer: buyer ? publicUser(buyer, { id: viewerUserId, role: store.users.get(String(viewerUserId))?.role || "public" }) : null,
@@ -64,6 +70,89 @@ router.get("/", authenticate, (req, res) => {
     .map((t) => safeTransfer(t, me));
 
   res.json({ success: true, transfers });
+});
+
+router.post("/", authenticate, (req, res) => {
+  seedIfEmpty();
+  const parsed = z
+    .object({
+      landParcelId: z.string().trim().min(1),
+      toUserId: z.string().trim().min(1),
+      amount: z.number().positive(),
+      escrowAmount: z.number().positive().optional(),
+    })
+    .safeParse(req.body);
+  if (!parsed.success) return res.status(400).json({ error: "Invalid payload" });
+
+  const parcel = store.parcels.get(parsed.data.landParcelId);
+  if (!parcel) return res.status(404).json({ error: "Parcel not found" });
+
+  const buyer = store.users.get(parsed.data.toUserId);
+  if (!buyer) return res.status(404).json({ error: "Buyer not found" });
+  if (String(buyer.id) === String(req.user.id)) {
+    return res.status(400).json({ error: "Buyer cannot be the same as seller" });
+  }
+
+  const actor = store.users.get(req.user.id) || null;
+  const isStaff = actor?.role === "admin" || actor?.role === "lands_commission";
+  if (!isStaff && String(parcel.sellerId) !== String(req.user.id)) {
+    return res.status(403).json({ error: "Only parcel owner can create transfer" });
+  }
+
+  const transferId = `transfer_${Math.random().toString(16).slice(2)}${Date.now().toString(16)}`;
+  const transfer = {
+    id: transferId,
+    parcelId: parcel.id,
+    sellerId: parcel.sellerId,
+    buyerId: parsed.data.toUserId,
+    amount: Number(parsed.data.amount),
+    escrowAmount: Number(parsed.data.escrowAmount || parsed.data.amount),
+    paystackReference: null,
+    status: "pending",
+    createdAt: new Date().toISOString(),
+  };
+
+  store.transfers.set(transfer.id, transfer);
+  parcel.transfers = [...(parcel.transfers || []), transfer];
+  if (parcel.status === "available") parcel.status = "pending_transfer_approval";
+
+  audit(req, "transfer.created.manual", {
+    transferId: transfer.id,
+    parcelId: parcel.id,
+    sellerId: transfer.sellerId,
+    buyerId: transfer.buyerId,
+  });
+  res.status(201).json({ success: true, transfer: safeTransfer(transfer, req.user.id) });
+});
+
+router.post("/:id/complete", authenticate, (req, res) => {
+  seedIfEmpty();
+  const transfer = store.transfers.get(String(req.params.id));
+  if (!transfer) return res.status(404).json({ error: "Transfer not found" });
+  if (transfer.status === "completed") {
+    return res.status(400).json({ error: "Transfer already completed" });
+  }
+
+  const actor = store.users.get(req.user.id) || null;
+  const staffRoles = new Set(["admin", "lands_commission", "arbitrator"]);
+  const canComplete =
+    staffRoles.has(String(actor?.role || "")) ||
+    String(transfer.sellerId) === String(req.user.id) ||
+    String(transfer.buyerId) === String(req.user.id);
+  if (!canComplete) return res.status(403).json({ error: "Forbidden" });
+
+  const parcel = store.parcels.get(String(transfer.parcelId));
+  if (!parcel) return res.status(404).json({ error: "Parcel not found" });
+
+  transfer.status = "completed";
+  transfer.completedAt = new Date().toISOString();
+  parcel.status = "sold";
+  parcel.lockedUntil = null;
+  parcel.sellerId = transfer.buyerId;
+  parcel.transfers = (parcel.transfers || []).map((t) => (t.id === transfer.id ? transfer : t));
+
+  audit(req, "transfer.completed.manual", { transferId: transfer.id, parcelId: parcel.id });
+  res.json({ success: true, transfer: safeTransfer(transfer, req.user.id) });
 });
 
 function ensureApprovals(transfer, parcel) {

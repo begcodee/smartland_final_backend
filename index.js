@@ -25,12 +25,14 @@ import userRoutes from "./src/routes/usersCompat.js";
 import notificationRoutes from "./src/routes/notifications.js";
 import ratingRoutes from "./src/routes/ratings.js";
 import transferRoutes from "./src/routes/transfers.js";
+import disputeRoutes from "./src/routes/disputes.js";
 import lawRoutes from "./src/routes/laws.js";
 import arbitrationRoutes from "./src/routes/arbitration.js";
 import fileRoutes from "./src/routes/files.js";
 import ssiRoutes from "./src/routes/ssi.js";
 import { attachRealtimeHub } from "./src/services/realtimeHub.js";
 import landsRoutes from "./src/routes/lands.js";
+import analyticsRoutes from "./src/routes/analytics.js";
 
 async function bootstrap() {
   const pool = await connectPostgres();
@@ -180,6 +182,8 @@ async function bootstrap() {
   app.use("/api/notifications", notificationRoutes);
   app.use("/api/ratings", ratingRoutes);
   app.use("/api/transfers", transferRoutes);
+  app.use("/api/disputes", disputeRoutes);
+  app.use("/api/analytics", analyticsRoutes);
   app.use("/api/laws", lawRoutes);
   app.use("/api/arbitration", arbitrationRoutes);
   app.use("/api/files", fileRoutes);
